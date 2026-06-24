@@ -12,12 +12,36 @@ import contextlib
 # 🛠️ חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת שגיאות
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
-# משיכת מפתח ה-API בצורה בטוחה מה-Secrets וניקוי תווים
-RAW_KEY = st.secrets.get("GEMINI_API_KEY", None)
-if RAW_KEY is not None:
-    GEMINI_API_KEY = str(RAW_KEY).replace('"', '').replace("'", "").strip()
-else:
-    GEMINI_API_KEY = ""
+# משיכת מפתח ה-API מה-Secrets, משתני סביבה או קובץ מקומי
+def _load_gemini_key():
+    raw = None
+    try:
+        raw = st.secrets.get("GEMINI_API_KEY", None)
+    except Exception:
+        pass
+    if not raw:
+        raw = os.environ.get("GEMINI_API_KEY")
+    if not raw and os.path.exists(".streamlit/secrets.toml"):
+        try:
+            with open(".streamlit/secrets.toml", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("GEMINI_API_KEY"):
+                        raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
+    if not raw and os.path.exists("Mybot.py"):
+        try:
+            with open("Mybot.py", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("GEMINI_API_KEY"):
+                        raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
+    return str(raw).replace('"', '').replace("'", "").strip() if raw else ""
+
+GEMINI_API_KEY = _load_gemini_key()
 
 FILENAME = "Stocks List.txt"
 
@@ -227,11 +251,25 @@ st.markdown("""
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
-        with open(FILENAME, "w") as f:
-            f.write("\n".join(default_stocks))
+        with open(FILENAME, "w", encoding="utf-8") as f:
+            f.write(",".join(default_stocks))
         return default_stocks
-    with open(FILENAME, "r") as f:
-        return [line.strip().upper() for line in f if line.strip()]
+    with open(FILENAME, "r", encoding="utf-8") as f:
+        content = f.read()
+    tickers = [
+        t.strip().upper()
+        for t in content.replace("\n", ",").replace("\r", ",").replace(" ", "").split(",")
+        if t.strip()
+    ]
+    return list(dict.fromkeys(tickers))
+
+def save_clean_tickers(clean_tickers):
+    try:
+        clean_tickers = list(dict.fromkeys(clean_tickers))
+        with open(FILENAME, "w", encoding="utf-8") as f:
+            f.write(",".join(clean_tickers))
+    except Exception:
+        pass
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -243,9 +281,21 @@ def calculate_rsi(prices, period=14):
     rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
 
+def _extract_ticker_df(chunk_data, ticker):
+    if chunk_data.empty:
+        return pd.DataFrame()
+    if isinstance(chunk_data.columns, pd.MultiIndex):
+        if ticker not in chunk_data.columns.get_level_values(0):
+            return pd.DataFrame()
+        return chunk_data[ticker].dropna()
+    if len(chunk_data.columns) <= 6:
+        return chunk_data.dropna()
+    return pd.DataFrame()
+
 def download_market_data_safely(ticker_list, progress_callback):
     temp_short = []
     temp_long = []
+    bad_tickers = set()
     chunk_size = 10
     chunks = [ticker_list[i:i + chunk_size] for i in range(0, len(ticker_list), chunk_size)]
     total_processed = 0
@@ -256,7 +306,7 @@ def download_market_data_safely(ticker_list, progress_callback):
                 try:
                     tickers_str = " ".join(chunk)
                     chunk_data = yf.download(tickers_str, period="1mo", interval="1d", group_by='ticker', auto_adjust=True, progress=False, ignore_tz=True)
-                except:
+                except Exception:
                     chunk_data = pd.DataFrame()
         
         for ticker in chunk:
@@ -264,37 +314,52 @@ def download_market_data_safely(ticker_list, progress_callback):
             progress_callback(total_processed, len(ticker_list), ticker)
             
             try:
-                if not chunk_data.empty and (ticker in chunk_data.columns.levels[0] if isinstance(chunk_data.columns, pd.MultiIndex) else ticker in chunk_data.columns):
-                    df_ticker = chunk_data[ticker].dropna() if isinstance(chunk_data.columns, pd.MultiIndex) else chunk_data.dropna()
-                    if not df_ticker.empty and len(df_ticker) >= 14:
-                        close_prices = df_ticker['Close'].squeeze()
-                        last_price = float(close_prices.iloc[-1])
-                        ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
-                        rsi = calculate_rsi(close_prices)
-                        volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
-                        
-                        if last_price < ma9 and volume > 1000000:
-                            if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
-                            elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
-                            else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
-                            
-                            temp_short.append({
-                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "Mמוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
-                            })
-                        elif last_price > ma9 and rsi > 45 and volume > 1000000:
-                            temp_long.append({
-                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "Mמוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
-                            })
-            except:
+                df_ticker = _extract_ticker_df(chunk_data, ticker)
+                if df_ticker.empty or len(df_ticker) < 14 or 'Close' not in df_ticker.columns:
+                    bad_tickers.add(ticker)
+                    continue
+                close_prices = df_ticker['Close'].squeeze()
+                last_price = float(close_prices.iloc[-1])
+                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                rsi = calculate_rsi(close_prices)
+                if 'Volume' not in df_ticker.columns:
+                    continue
+                volume = int(df_ticker['Volume'].iloc[-1])
+                
+                if last_price < ma9 and volume > 1000000:
+                    if rsi > 65:
+                        cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
+                    elif rsi < 40:
+                        cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
+                    else:
+                        cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                    
+                    temp_short.append({
+                        "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}",
+                        "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
+                    })
+                elif last_price > ma9 and rsi > 45 and volume > 1000000:
+                    temp_long.append({
+                        "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}",
+                        "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
+                    })
+            except Exception:
+                bad_tickers.add(ticker)
                 continue
         time.sleep(0.3)
+
+    if bad_tickers:
+        save_clean_tickers([t for t in ticker_list if t not in bad_tickers])
     return temp_short, temp_long
 
 def ask_gemini_with_retry(question, retries=2, delay=1.5):
     if not ai_client:
-        return "⚠️ מערכת ה-AI לא מאותחלת. אנא ודא שהגדרת את ה-Secrets בענן בצורה תקינה."
+        return "⚠️ מערכת ה-AI לא מאותחלת. אנא ודא שהגדרת את GEMINI_API_KEY ב-Secrets או במשתני הסביבה."
     from google.genai import types
-    system_instruction = "אתה אנליסט פיננסי בכיר ומנוסה מאוד. ענה בעברית מקצועית וממוקדת שוק ההון."
+    system_instruction = (
+        "אתה אנליסט פיננסי בכיר ומנוסה מאוד. ענה בעברית מקצועית וממוקדת שוק ההון. "
+        "חובה: החזר בדיוק 5 עד 7 שורות בלבד. ציין במה החברה עוסקת והאם התנאים מתאימים לקנייה או מכירה."
+    )
     for attempt in range(retries + 1):
         try:
             response = ai_client.models.generate_content(
@@ -302,12 +367,97 @@ def ask_gemini_with_retry(question, retries=2, delay=1.5):
                 contents=question,
                 config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.2)
             )
-            return response.text
+            return response.text.strip()
         except Exception as e:
             if "503" in str(e) and attempt < retries:
                 time.sleep(delay)
                 continue
-            return "מניית סקטור מובילה. המלצת קונזנזוס כללית חיובית עם מומנטום יציב לטווח ארוך."
+            return "⚠️ שגיאה בחיבור ל-Gemini. אנא נסה שוב בעוד מספר שניות."
+
+def get_analyst_buy_pct(ticker_obj):
+    try:
+        recs = ticker_obj.recommendations
+        if recs is not None and not recs.empty:
+            latest_rec = recs.iloc[-1]
+            total = sum(float(latest_rec.get(k, 0)) for k in ['strongBuy', 'buy', 'hold', 'sell', 'strongSell'])
+            if total > 0:
+                return int(((float(latest_rec.get('strongBuy', 0)) + float(latest_rec.get('buy', 0))) / total) * 100)
+    except Exception:
+        pass
+    try:
+        info = ticker_obj.info or {}
+        mean_score = info.get('recommendationMean')
+        if mean_score is not None:
+            return int(((5.0 - float(mean_score)) / 4.0) * 100)
+    except Exception:
+        pass
+    return None
+
+def build_single_stock_metrics(ticker):
+    defaults = dict(TEXT_DEFAULTS)
+    try:
+        with open(os.devnull, 'w') as devnull:
+            with contextlib.redirect_stderr(devnull):
+                t = yf.Ticker(ticker, session=session)
+                hist = t.history(period="1mo", auto_adjust=True)
+        if not hist.empty and len(hist) >= 14:
+            close_prices = hist['Close'].squeeze()
+            rsi_val = calculate_rsi(close_prices)
+            ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+            last_price = float(close_prices.iloc[-1])
+            if rsi_val > 70:
+                defaults["rsi_neutral"] = f"RSI = {rsi_val:.1f} - קניית יתר 🛑"
+            elif rsi_val < 30:
+                defaults["rsi_neutral"] = f"RSI = {rsi_val:.1f} - מכירת יתר 🟢"
+            else:
+                defaults["rsi_neutral"] = f"RSI = {rsi_val:.1f} - נייטרלי"
+            defaults["ma_expensive" if last_price > ma9 else "ma_buy"] = (
+                f"מחיר ${last_price:.2f} | MA9 ${ma9:.2f} - "
+                + ("המניה נסחרת מעל הממוצע הנע 9." if last_price > ma9 else "המניה נסחרת מתחת לממוצע נע 9 - אזור קנייה פוטנציאלי.")
+            )
+        with open(os.devnull, 'w') as devnull:
+            with contextlib.redirect_stderr(devnull):
+                info = t.info or {}
+                expirations = t.options
+                if expirations:
+                    opt = t.option_chain(expirations[0])
+                    total_calls = opt.calls['volume'].fillna(0).sum() if 'volume' in opt.calls.columns else 0
+                    total_puts = opt.puts['volume'].fillna(0).sum() if 'volume' in opt.puts.columns else 0
+                    total_vol = total_calls + total_puts
+                    if total_vol > 0:
+                        call_pct = (total_calls / total_vol) * 100
+                        put_pct = 100 - call_pct
+                        defaults["options_calls"] = f"Calls {call_pct:.1f}% | Puts {put_pct:.1f}%"
+                earnings_df = t.earnings_dates
+                if earnings_df is not None and not earnings_df.empty and 'Surprise(%)' in earnings_df.columns:
+                    reported = earnings_df.dropna(subset=['Surprise(%)']).head(4)
+                    beats = sum(1 for _, row in reported.iterrows() if row['Surprise(%)'] >= 0)
+                    if len(reported) >= 4:
+                        defaults["earnings_ok"] = f"עמדה/עקפה תחזיות ב-{beats} מתוך 4 רבעונים אחרונים"
+                growth = info.get('revenueGrowth') or info.get('earningsGrowth')
+                if growth is not None:
+                    defaults["next_quarter_grow"] = f"צפי צמיחה של כ-{float(growth) * 100:.1f}% לפי נתוני השוק"
+                buy_pct = get_analyst_buy_pct(t)
+                if buy_pct is not None:
+                    if buy_pct >= 75:
+                        defaults["rec_buy"] = f"קנייה חזקה 🔥 ({buy_pct}% מהאנליסטים ממליצים לונג)"
+                    elif buy_pct >= 50:
+                        defaults["rec_buy"] = f"קנייה מתונה ({buy_pct}% המלצות קנייה)"
+                    else:
+                        defaults["rec_buy"] = f"זהירות / מעקב ({buy_pct}% המלצות קנייה בלבד)"
+    except Exception:
+        pass
+    ma_text = defaults["ma_expensive"]
+    if defaults["ma_buy"] != TEXT_DEFAULTS["ma_buy"]:
+        ma_text = defaults["ma_buy"]
+    return {
+        "rsi": defaults["rsi_neutral"],
+        "ma": ma_text,
+        "options": defaults["options_calls"],
+        "earnings": defaults["earnings_ok"],
+        "next_quarter": defaults["next_quarter_grow"],
+        "recommendation": defaults["rec_buy"],
+    }
 
 # אתחול רשימות הנתונים בסשן סטייט למניעת הבהובים והיעלמויות
 if "short_list" not in st.session_state: st.session_state.short_list = []
@@ -315,8 +465,12 @@ if "long_list" not in st.session_state: st.session_state.long_list = []
 if "steps_log" not in st.session_state: st.session_state.steps_log = []
 if "radar_scanned" not in st.session_state: st.session_state.radar_scanned = False
 if "single_results" not in st.session_state: st.session_state.single_results = None
+if "free_ai_answer" not in st.session_state: st.session_state.free_ai_answer = None
 
 # הגדרת הטאבים עם האייקונים משמאל באופן קשיח
+st.markdown('<h1 class="main-title">⚡ The Mind Changer</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">מערכת ראדאר חכמה לזיהוי מומנטום בשוק ההון | סריקה טכנית + ניתוח AI פונדמנטלי</p>', unsafe_allow_html=True)
+
 tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח מניה בודדת & AI 🔍"])
 
 with tab1:
@@ -340,55 +494,33 @@ with tab2:
 with tab3:
     st.markdown('<div class="center-header-block" style="text-align:center;"><h2>🤖 ניתוח מניה ומנוע שאלות AI</h2></div>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
-    
-    # שימוש בטקסטים המבודדים מהמילון למניעת שגיאות סינטקס
-    rsi_val = TEXT_DEFAULTS["rsi_neutral"]
-    ma_val = TEXT_DEFAULTS["ma_expensive"]
-    options_val = TEXT_DEFAULTS["options_calls"]
-    earnings_val = TEXT_DEFAULTS["earnings_ok"]
-    next_quarter_val = TEXT_DEFAULTS["next_quarter_grow"]
-    rec_val = TEXT_DEFAULTS["rec_buy"]
-    ai_val = TEXT_DEFAULTS["ai_init"]
-
     with col1:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
-        search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
-        run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
+        with st.form("analyze_form", clear_on_submit=False):
+            search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input")
+            run_analysis = st.form_submit_button("🔍 נתח מניה")
         st.markdown('</div>', unsafe_allow_html=True)
         
-        if run_analysis and search_ticker:
-            progress_bar_ind = st.progress(0)
-            status_text_ind = st.empty()
-            start_time = time.time()
-            
-            for percent_complete in range(1, 101, 10):
-                current_elapsed = time.time() - start_time
-                status_text_ind.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מנתח נתונים... זמן זורם: {current_elapsed:.1f} שניות</span>", unsafe_allow_html=True)
-                progress_bar_ind.progress(percent_complete)
-                time.sleep(0.1)
-            
-            try:
-                t = yf.Ticker(search_ticker, session=session)
-                hist = t.history(period="1mo", auto_adjust=True)
-                if not hist.empty:
-                    close_prices = hist['Close'].squeeze()
-                    last_price = float(close_prices.iloc[-1])
-                    if last_price > close_prices.rolling(window=9).mean().iloc[-1]:
-                        ma_val = TEXT_DEFAULTS["ma_expensive"]
-                    else:
-                        ma_val = TEXT_DEFAULTS["ma_buy"]
-            except:
-                pass
-
-            ai_prompt = f"Analyze stock {search_ticker}. Return short financial summary in Hebrew in 5-7 lines max."
-            ai_val = ask_gemini_with_retry(ai_prompt)
-            
-            progress_bar_ind.empty()
-            status_text_ind.empty()
+        if run_analysis and search_ticker.strip():
+            search_ticker = search_ticker.upper().strip()
+            with st.spinner("מנתח נתונים ומפעיל את Gemini..."):
+                metrics = build_single_stock_metrics(search_ticker)
+                ai_prompt = (
+                    f"נתח את מניית {search_ticker}. "
+                    f"החזר סיכום פיננסי קצר בעברית ב-5-7 שורות בלבד. "
+                    f"ציין במה החברה עוסקת, מגמת מחיר, והאם מתאים לקנייה או מכירה."
+                )
+                ai_val = ask_gemini_with_retry(ai_prompt)
             
             st.session_state.single_results = {
-                "ticker": search_ticker, "rsi": rsi_val, "ma": ma_val, "options": options_val,
-                "earnings": earnings_val, "next_quarter": next_quarter_val, "recommendation": rec_val, "ai_data": ai_val
+                "ticker": search_ticker,
+                "rsi": metrics["rsi"],
+                "ma": metrics["ma"],
+                "options": metrics["options"],
+                "earnings": metrics["earnings"],
+                "next_quarter": metrics["next_quarter"],
+                "recommendation": metrics["recommendation"],
+                "ai_data": ai_val,
             }
 
         if st.session_state.single_results:
@@ -409,13 +541,16 @@ with tab3:
 
     with col2:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
-        user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
-        run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
+        with st.form("ai_form", clear_on_submit=False):
+            user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
+            run_ai = st.form_submit_button("🧠 שאל את האנליסט")
         st.markdown('</div>', unsafe_allow_html=True)
-        if run_ai and user_q:
+        if run_ai and user_q.strip():
             with st.spinner("ה-AI חושב..."):
-                answer = ask_gemini_with_retry(user_q)
-                st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
+                st.session_state.free_ai_answer = ask_gemini_with_retry(user_q.strip())
+        if st.session_state.free_ai_answer:
+            answer = st.session_state.free_ai_answer
+            st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
 
 # ====================================================================
 #  כפתור החיפוש המרכזי ממוקם כעת באופן קבוע כאן - בתחתית המסך!
