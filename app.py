@@ -4,28 +4,27 @@ import pandas as pd
 import numpy as np
 import os
 import requests
-import random  # <-- התיקון כאן! מייבא את הספרייה כדי לפתור את ה-NameError
+import random  # מייבא את הספרייה כדי לפתור את ה-NameError
 
 # משיכת מפתח ה-API מה-Secrets וניקוי אוטומטי של תווים לא חוקיים
 RAW_KEY = st.secrets.get("GEMINI_API_KEY", "")
 GEMINI_API_KEY = RAW_KEY.replace('"', '').replace("'", "").strip() if RAW_KEY else ""
 FILENAME = "Stocks List.txt"
 
-# אתחול ה-AI של גוגל בצורה מאובטחת
+# אתחול בטוח לחלוטין של ה-AI למניעת שגיאות ModuleNotFoundError
+ai_client = None
 try:
     if GEMINI_API_KEY:
         from google import genai
         from google.genai import types
         ai_client = genai.Client(api_key=GEMINI_API_KEY)
-    else:
-        ai_client = None
 except Exception:
     ai_client = None
 
 # הגדרת עיצוב הדף של Streamlit
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
-# פונקציה לייצור כותרות דפדפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
+# פונקציה לייצור כותרות דפנפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -220,7 +219,7 @@ def calculate_rsi(close_prices, period=14):
 
 def ask_gemini(question):
     if not ai_client:
-        return "⚠️ מערכת ה-AI לא מאותחלת. אנא ודא שהגדרת את ה-Secrets בענן בצורה תקינה."
+        return "⚠️ מערכת ה-AI לא מאותחלת או שחסרה ספריית google-genai ב-requirements.txt."
     try:
         from google.genai import types
         system_instruction = "אתה אנליסט פיננסי בכיר ומנוסה מאוד. ענה בעברית מקצועית, שנונה, מדויקת וממוקדת שוק ההון."
