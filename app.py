@@ -18,154 +18,192 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # ==========================================
-#      עיצוב עתידני מותאם אישית (Cyber Wall Street)
+#     מערכת עיצוב פרימיום - בורסה וגרפים ברקע
 # ==========================================
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@300;400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
 
-    /* רקע עמוק עם אפקט רשת גרפים דיגיטלית של בורסה */
+    /* תמונת רקע של בורסה וגרפים עם אפקט טשטוש ויוקרה */
     .stApp {
-        background-color: #060913;
         background-image: 
-            linear-gradient(rgba(0, 242, 254, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0, 242, 254, 0.03) 1px, transparent 1px);
-        background-size: 40px 40px;
+            linear-gradient(rgba(6, 9, 19, 0.88), rgba(6, 9, 19, 0.93)),
+            url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
         color: #e2e8f0;
         font-family: 'Inter', sans-serif;
     }
     
-    /* כותרת ראשית - אפקט זוהר לבן-דיגיטלי */
-    .main-title {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 4rem !important;
-        font-weight: 900;
-        letter-spacing: 2px;
-        color: #ffffff;
-        text-align: center;
-        margin-top: 30px;
-        margin-bottom: 10px;
-        text-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+    /* כפיית כיוון RTL על כל האפליקציה באופן גורף */
+    .stApp, div[data-testid="stVerticalBlock"] {
+        direction: rtl !important;
+        text-align: right !important;
     }
     
-    /* תת כותרת ממורכזת ויוקרתית */
+    /* כותרת ראשית ממורכזת */
+    .main-title {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 3.8rem !important;
+        font-weight: 900;
+        letter-spacing: 1px;
+        color: #ffffff;
+        text-align: center !important;
+        margin-top: 25px;
+        margin-bottom: 10px;
+        text-shadow: 0 0 20px rgba(0, 242, 254, 0.3), 0 0 40px rgba(255, 255, 255, 0.2);
+    }
+    
+    /* תת כותרת ממורכזת ומיושרת היטב */
     .sub-title {
         font-size: 1.15rem;
-        color: #94a3b8;
-        text-align: center;
+        color: #cbd5e1;
+        text-align: center !important;
         max-width: 850px;
-        margin: 0 auto 50px auto;
+        margin: 0 auto 40px auto;
         line-height: 1.7;
-        direction: rtl;
+        direction: rtl !important;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
     
     /* עיצוב כרטיסיות (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 15px;
-        justify-content: center;
-        border-bottom: 1px solid #1e293b;
+        gap: 12px;
+        justify-content: center !important;
+        border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+        direction: rtl !important;
     }
     .stTabs [data-baseweb="tab"] {
-        background-color: #0b0f19;
-        border: 1px solid #1e293b;
+        background-color: rgba(11, 15, 25, 0.85);
+        border: 1px solid rgba(30, 41, 59, 0.5);
         border-radius: 6px 6px 0px 0px;
-        padding: 12px 28px;
-        color: #64748b;
+        padding: 10px 24px;
+        color: #94a3b8;
         font-weight: 600;
         font-size: 1rem;
-        transition: all 0.25s ease;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #f8fafc;
-        background-color: #1e293b;
-        border-color: #475569;
+        backdrop-filter: blur(4px);
     }
     .stTabs [aria-selected="true"] {
-        background-color: #111827 !important;
+        background-color: #0f172a !important;
         color: #ffbc00 !important;
         border-color: #ffbc00 !important;
         box-shadow: 0 -4px 12px rgba(255, 188, 0, 0.15);
     }
 
-    /* קונטיינר מרכזי מהודק ומיושר לחלוטין */
-    .tab-content-container {
-        direction: rtl;
-        text-align: center;
+    /* קונטיינרים זכוכיתיים (Glassmorphism) יוקרתיים מיושרים וממורכזים */
+    .cyber-box {
+        direction: rtl !important;
+        text-align: center !important;
         max-width: 750px;
-        margin: 40px auto;
+        margin: 30px auto;
         padding: 40px 30px;
-        background: rgba(11, 15, 25, 0.9);
-        border: 1px solid #1e293b;
+        background: rgba(11, 17, 30, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.07);
         border-radius: 16px;
-        box-sizing: border-box;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.7);
-        backdrop-filter: blur(8px);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        backdrop-filter: blur(10px);
     }
     
-    .tab-content-container h3 {
-        color: #ffffff;
-        font-size: 1.8rem;
-        margin-bottom: 15px;
+    .cyber-box h3 {
+        color: #ffffff !important;
+        font-size: 1.7rem;
+        margin-bottom: 12px;
+        text-align: center !important;
     }
     
-    .tab-content-container p {
-        color: #94a3b8;
-        font-size: 1.1rem;
-        margin-bottom: 35px;
+    .cyber-box p {
+        color: #94a3b8 !important;
+        font-size: 1.05rem;
+        margin-bottom: 30px;
         line-height: 1.6;
+        text-align: center !important;
     }
 
-    /* תיקון וכפייה של עיצוב הכפתור הממורכז - ביטול הרקע הלבן הדיפולטיבי */
+    /* עיצוב גורף ויציב לכפתורים - ממורכזים לחלוטין */
+    div.stButton {
+        text-align: center !important;
+        display: flex;
+        justify-content: center;
+        margin-top: 15px;
+    }
+    
     div.stButton > button {
-        color: #000000 !important;
-        font-weight: 800 !important;
-        font-size: 1.1rem !important;
-        padding: 14px 40px !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 1rem !important;
+        padding: 12px 40px !important;
         border-radius: 30px !important;
+        border: none !important;
         width: auto !important;
-        min-width: 260px !important;
-        margin: 0 auto !important;
-        display: inline-block !important;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        transition: all 0.3s ease !important;
+        min-width: 240px !important;
+        transition: all 0.25s ease !important;
+        cursor: pointer;
     }
     
-    /* התאמת צבע ייעודית לכפתור בתוך תיבת שורט */
-    .short-container div.stButton > button {
-        background: #ef4444 !important;
-        border: 1px solid #f87171 !important;
-        box-shadow: 0 0 15px rgba(239, 68, 68, 0.4) !important;
+    /* צבעים ייעודיים לכפתורים */
+    .short-btn-style div.stButton > button {
+        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
+        box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4) !important;
     }
-    .short-container div.stButton > button:hover {
-        background: #dc2626 !important;
-        box-shadow: 0 0 25px rgba(239, 68, 68, 0.7) !important;
+    .short-btn-style div.stButton > button:hover {
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
+        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.6) !important;
         transform: translateY(-2px);
     }
 
-    /* התאמת צבע ייעודית לכפתור בתוך תיבת לונג */
-    .long-container div.stButton > button {
-        background: #10b981 !important;
-        border: 1px solid #34d399 !important;
-        box-shadow: 0 0 15px rgba(16, 185, 129, 0.4) !important;
+    .long-btn-style div.stButton > button {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+        box-shadow: 0 4px 15px rgba(5, 150, 105, 0.4) !important;
     }
-    .long-container div.stButton > button:hover {
-        background: #059669 !important;
-        box-shadow: 0 0 25px rgba(16, 185, 129, 0.7) !important;
+    .long-btn-style div.stButton > button:hover {
+        background: linear-gradient(135deg, #10b981 0%, #065f46 100%) !important;
+        box-shadow: 0 6px 20px rgba(5, 150, 105, 0.6) !important;
         transform: translateY(-2px);
     }
 
-    /* עיצוב טבלאות נתונים */
-    .stDataFrame {
-        background-color: #0b0f17;
-        border: 1px solid #1e293b;
-        border-radius: 8px;
-        margin-top: 25px;
+    .action-btn-style div.stButton > button {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3) !important;
+    }
+    .action-btn-style div.stButton > button:hover {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+        transform: translateY(-2px);
+    }
+
+    /* סידור שדות קלט (Inputs) */
+    div[data-testid="stTextInput"] {
+        direction: rtl !important;
+        text-align: right !important;
     }
     
-    .rtl-text {
-        direction: rtl;
-        text-align: right;
+    div[data-testid="stTextInput"] input {
+        text-align: right !important;
+        direction: rtl !important;
+        background-color: rgba(15, 23, 42, 0.9) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 8px !important;
+        padding: 10px !important;
+    }
+    
+    div[data-testid="stTextInput"] label {
+        text-align: right !important;
+        width: 100% !important;
+        color: #cbd5e1 !important;
+        font-weight: 600 !important;
+    }
+
+    /* עיצוב אזור ה-AI והחיפוש בטורים */
+    .search-section {
+        background: rgba(11, 17, 30, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 16px;
+        padding: 30px;
+        margin-top: 20px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 15px 30px rgba(0,0,0,0.5);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -200,7 +238,7 @@ def ask_gemini(question):
     except Exception as e:
         return f"⚠️ שגיאה בחיבור ל-AI: {str(e)}"
 
-# --- כותרת ראשית מעוצבת של האתר ---
+# --- כותרת ראשית ---
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
 # --- ברכת ברוכים הבאים בעמוד הראשי ---
@@ -211,25 +249,23 @@ tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדא�
 
 # ==================== כרטיסיית רדאר שורט ====================
 with tab1:
-    # עטיפת התוכן והכפתור יחד בתוך קלאס קשיח אחד (short-container)
-    st.markdown('<div class="short-container"><div class="tab-content-container">⚡'
-                '<h3>🐻 סורק מניות לשורט (Short Swing)</h3>'
+    st.markdown('<div class="cyber-box">⚡'
+                '<h3>סורק מניות לשורט (Short Swing)</h3>'
                 '<p>סורק מניות לשורט, המבוסס על נתונים ייחודים שיכולים להגדיר מניות לשורט</p>', unsafe_allow_html=True)
     
-    run_short = st.button("🚀 הפעל סריקת שורט")
+    st.markdown('<div class="short-btn-style">', unsafe_allow_html=True)
+    run_short = st.button("🚀 הפעל סריקת שורט", key="btn_short")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
     if run_short:
         tickers = get_all_tickers()
         st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
-        
         progress_bar = st.progress(0)
         stage1_passed = []
         
         with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים..."):
             try:
                 data = yf.download(tickers, period="6mo", group_by='ticker', progress=False, auto_adjust=True)
-                
                 for idx, ticker in enumerate(tickers):
                     try:
                         if ticker not in data.columns.levels[0]: continue
@@ -289,7 +325,6 @@ with tab1:
             if final_short:
                 final_short = sorted(final_short, key=lambda x: x['put_pct'], reverse=True)[:10]
                 st.balloons()
-                
                 df_display = pd.DataFrame(final_short)
                 df_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי", "אחוז אופציות PUT"]
                 st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}", "אחוז אופציות PUT": "{:.1f}%"}), use_container_width=True)
@@ -298,11 +333,12 @@ with tab1:
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
-    st.markdown('<div class="long-container"><div class="tab-content-container">⚡'
-                '<h3>🐂 סורק מניות ללונג (Long Swing)</h3>'
+    st.markdown('<div class="cyber-box">⚡'
+                '<h3>סורק מניות ללונג (Long Swing)</h3>'
                 '<p>סורק מניות ללונג, המבוסס על נתונים ייחודים שיכולים להגדיר מניות ללונג</p>', unsafe_allow_html=True)
     
-    run_long = st.button("🚀 הפעל סריקת לונג")
+    st.markdown('<div class="long-btn-style">', unsafe_allow_html=True)
+    run_long = st.button("🚀 הפעל סריקת לונג", key="btn_long")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
     if run_long:
@@ -310,13 +346,18 @@ with tab2:
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
-    st.markdown('<div style="max-width:1000px; margin:20px auto;"><div class="rtl-text"><h3>🤖 ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div style="max-width:1100px; margin:20px auto 0 auto;"><h3>ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
     
-    col1, col2 = st.columns([1, 2])
+    col1, col2 = st.columns(2)
+    
     with col1:
-        st.markdown('<div class="rtl-text" style="font-weight:bold; margin-bottom:10px;">ניתוח טכני מהיר:</div>', unsafe_allow_html=True)
+        st.markdown('<div class="search-section">', unsafe_allow_html=True)
         search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
-        if st.button("🔍 נתח מניה"):
+        st.markdown('<div class="action-btn-style">', unsafe_allow_html=True)
+        run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
+        st.markdown('</div></div>', unsafe_allow_html=True)
+        
+        if run_analysis:
             if search_ticker:
                 with st.spinner("מושך נתונים..."):
                     t = yf.download(search_ticker, period="6mo", auto_adjust=True)
@@ -331,14 +372,17 @@ with tab3:
                 st.warning("אנא הזן סימול.")
                 
     with col2:
-        st.markdown('<div class="rtl-text" style="font-weight:bold; margin-bottom:10px;">שאל את האנליסט AI:</div>', unsafe_allow_html=True)
-        user_q = st.text_input("שאל שאלות פיננסיות וכלכליות חופשיות:", key="ask_input")
-        if st.button("🧠 שאל את האנליסט"):
+        st.markdown('<div class="search-section">', unsafe_allow_html=True)
+        user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
+        st.markdown('<div class="action-btn-style">', unsafe_allow_html=True)
+        run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
+        st.markdown('</div></div>', unsafe_allow_html=True)
+        
+        if run_ai:
             if user_q:
                 with st.spinner("ה-AI חושב ומנתח..."):
                     answer = ask_gemini(user_q)
-                    st.markdown(f'<div class="rtl-text" style="background-color:#0b0f17; padding:20px; border-radius:8px; border:1px solid #1e293b;">'
+                    st.markdown(f'<div style="background-color:#0f172a; padding:20px; border-radius:8px; border:1px solid #1e293b; margin-top:20px;">'
                                 f'<h4>📋 תשובת האנליסט:</h4><p>{answer}</p></div>', unsafe_allow_html=True)
             else:
                 st.warning("אנא הקלד שאלה תחילה.")
-    st.markdown('</div>', unsafe_allow_html=True)
