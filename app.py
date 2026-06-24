@@ -97,7 +97,7 @@ st.markdown("""
         color: #ffbc00 !important;
     }
 
-    /* קונטיינר מרכזי לרדארים */
+    /* קונטיינר מרכזי נקי לרדארים */
     .cyber-box {
         direction: rtl !important;
         text-align: center !important;
@@ -419,18 +419,24 @@ with tab2:
                         if len(df) < 15: continue
                         
                         current_price = float(df['Close'].iloc[-1])
+                        
+                        # קריטריון 1: טווח מחיר 15-450
                         if not (15 <= current_price <= 450): continue
                         
+                        # קריטריון 2: מדד RSI מתחת ל-70
                         df['RSI'] = calculate_rsi(df['Close'])
                         last_rsi = float(df['RSI'].iloc[-1])
                         if np.isnan(last_rsi) or last_rsi >= 70: continue
                         
+                        # קריטריון 3: השוואת נרות סגירה
                         close_day1 = float(df['Close'].iloc[-1])
                         close_day2 = float(df['Close'].iloc[-2])
                         close_day3 = float(df['Close'].iloc[-3])
                         if (close_day1 <= close_day3) or (close_day2 <= close_day3): continue
                         
+                        # קריטריון 4: היסחרות מתחת ל-MA9 ב-4 ימי המסחר האחרונים ברציפות
                         df['MA9'] = df['Close'].rolling(window=9).mean()
+                        
                         under_ma9_day1 = float(df['Close'].iloc[-1]) < float(df['MA9'].iloc[-1])
                         under_ma9_day2 = float(df['Close'].iloc[-2]) < float(df['MA9'].iloc[-2])
                         under_ma9_day3 = float(df['Close'].iloc[-3]) < float(df['MA9'].iloc[-3])
@@ -459,6 +465,7 @@ with tab2:
                         opt = t.option_chain(exp[0])
                         tc = opt.calls['volume'].fillna(0).sum()
                         tp = opt.puts['volume'].fillna(0).sum()
+                        
                         if tc > tp:
                             final_long.append(s)
                 except: pass
@@ -472,7 +479,7 @@ with tab2:
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
-# ==================== כרטיסיית מניה בודדת ו-AI (שדרוג מסיבי מותאם) ====================
+# ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
     st.markdown('<div class="center-header-block">'
                 '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
@@ -493,11 +500,11 @@ with tab3:
                 if search_ticker:
                     with st.spinner("מבצע ניתוח מעמיק ושולף נתוני שוק..."):
                         t = yf.Ticker(search_ticker)
-                        # הורדת דאטה היסטורי לממוצעים ו-RSI
                         hist = t.history(period="1y", auto_adjust=True)
                         
                         if not hist.empty:
                             close_prices = hist['Close'].squeeze()
+                            df_stock = pd.DataFrame(hist).dropna()
                             
                             # ---- 1. בדיקת RSI ----
                             rsi_values = calculate_rsi(close_prices)
@@ -518,11 +525,10 @@ with tab3:
                             ma_status = "המניה במצב מגמה מעורב"
                             if ma100 > 0 and ma200 > 0 and last_price > ma9 and last_price > ma100 and last_price > ma200:
                                 ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
-                            elif last_price < ma9 and (ma100 > 0 and last_price >= ma100) or last_price < ma9:
-                                # אם נסחרת רק מתחת ל-MA9 (או לפחות מתחת ל-MA9 בטווח הקצר)
+                            elif last_price < ma9:
                                 ma_status = "המניה נסחרת מתחת לממוצע נע 9 - המניה עדיין באזורי קנייה."
                                 
-                            # ---- 3. בדיקת אופציות (קול או שורט/פוט) ----
+                            # ---- 3. בדיקת אופציות ----
                             options_status = "אין נתוני אופציות זמינים לפקיעה הקרובה"
                             try:
                                 exp = t.options
@@ -534,58 +540,48 @@ with tab3:
                                         options_status = f"Calls חזקים יותר (קול: {tc:,.0f} | פוט: {tp:,.0f})"
                                     elif tp > tc:
                                         options_status = f"Puts/Short חזקים יותר (פוט: {tp:,.0f} | קול: {tc:,.0f})"
-                                    else:
-                                        options_status = "שוויון מוחלט בין נפח הקולים לפוטים"
                             except: pass
                             
-                            # ---- 4. בדיקת דוחות שנה אחרונה (תחזית הכנסות) ----
-                            earnings_status = "לא נמצאו נתוני הפתעות הכנסה היסטוריים"
-                            try:
-                                info = t.info
-                                # בדיקת נתוני עמידה בציפיות מתוך המידע הפונדמנטלי
-                                if 'earningsQuarterlyGrowth' in info:
-                                    earnings_status = "החברה הציגה עמידה יציבה/עקיפה בתחזיות הפיננסיות הכלליות בשנה האחרונה"
-                                else:
-                                    earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות של האנליסטים בשנה החולפת"
-                            except: pass
-                            
-                            # ---- 5. צפי דוחות לרבעון הבא ----
+                            # ---- הגנה קשיחה על שליפת t.info למניעת קריסות (סעיפים 4, 5, 6, 7) ----
+                            earnings_status = "אין מידע אנליסטים היסטורי זמין"
                             next_quarter_status = "אין צפי לגדול / אין מידע אנליסטים זמין"
+                            recommendation_status = "אין המלצות מעודכנות זמינות"
+                            company_business = "אין תיאור חברה זמין בארכיון."
+                            
                             try:
-                                # ניתוח הצמיחה העתידית מתוך הנתונים הפיננסיים של החברה
-                                growth_est = t.info.get('earningsGrowth', 0)
-                                if growth_est and growth_est > 0:
-                                    next_quarter_status = f"הצפי הוא לגדול בכמחצית השנה הקרובה בשיעור של כ-{growth_est * 100:.1f}%"
+                                info_data = t.info
+                                if isinstance(info_data, dict):
+                                    # 4. דוחות שנה אחרונה
+                                    if info_data.get('earningsQuarterlyGrowth') is not None:
+                                        earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות של האנליסטים בשנה החולפת"
+                                        
+                                    # 5. צפי דוחות רבעון הבא
+                                    growth_est = info_data.get('earningsGrowth', 0)
+                                    if growth_est and growth_est > 0:
+                                        next_quarter_status = f"הצפי הוא לגדול בכמחצית השנה הקרובה בשיעור של כ-{growth_est * 100:.1f}%"
+                                        
+                                    # 6. המלצות אנליסטים
+                                    rec_key = info_data.get('recommendationKey', 'N/A')
+                                    target_mean = info_data.get('targetMeanPrice', 0)
+                                    translation_map = {
+                                        "strong_buy": "קנייה חזקה 🔥 (רוב מוחלט של כ-85%+)",
+                                        "buy": "קנייה 🟢 (סביבות כ-70%)",
+                                        "hold": "החזקה 🟡 (נייטרלי, כ-50%)",
+                                        "sell": "מכירה 🔴 (סנטימנט שלילי)"
+                                    }
+                                    recommendation_status = translation_map.get(rec_key, f"סטטוס: {rec_key}")
+                                    if target_mean > 0:
+                                        recommendation_status += f" | מחיר יעד ממוצע: ${target_mean:.2f}"
+                                        
+                                    # 7. פרופיל חברה
+                                    company_business = info_data.get('longBusinessSummary', company_business)
                             except: pass
                             
-                            # ---- 6. המלצות אנליסטים באחוזים ----
-                            recommendation_status = "אין המלצות מעודכנות בטבלה"
-                            try:
-                                info = t.info
-                                buy_recs = info.get('numberOfAnalystOpinions', 0)
-                                target_mean = info.get('targetMeanPrice', 0)
-                                rec_key = info.get('recommendationKey', 'N/A')
-                                
-                                # המרה לשפה פשוטה ואחוזים מוערכים בהתאם לסנטימנט הכללי של האנליסטים
-                                translation_map = {
-                                    "strong_buy": "קנייה חזקה 🔥 (רוב מוחלט של כ-85%+)",
-                                    "buy": "קנייה 🟢 (סביבות כ-70%)",
-                                    "hold": "החזקה 🟡 (נייטרלי, כ-50%)",
-                                    "sell": "מכירה 🔴 (סנטימנט שלילי)",
-                                    "underperform": "ביצועי חסר 📉"
-                                }
-                                recommendation_status = translation_map.get(rec_key, f"סטטוס כללי: {rec_key}")
-                                if target_mean > 0:
-                                    recommendation_status += f" | מחיר יעד ממוצע: ${target_mean:.2f}"
-                            except: pass
-                            
-                            # ---- 7. פרופיל חברה וחוות דעת אנליסט AI ----
-                            company_business = t.info.get('longBusinessSummary', 'אין תיאור חברה זמין בארכיון.')
-                            
+                            # שליחת שאילתה ל-AI ליצירת סעיף 7 (תיאור + דעה אישית מנומקת)
                             ai_prompt = (
-                                f"חברה: {search_ticker}. עיסוק: {company_business[:600]}. "
-                                f"מחיר: ${last_price}, RSI: {last_rsi}, סנטימנט אנליסטים: {recommendation_status}. "
-                                f"רשום במה החברה מתעסקת בקצרה בעברית, ותן חוות דעת פיננסית אישית, מקצועית ומנומקת עליה."
+                                f"חברה: {search_ticker}. עיסוק: {company_business[:500]}. "
+                                f"מחיר: ${last_price}, RSI: {last_rsi}, המלצות: {recommendation_status}. "
+                                f"רשום במה החברה מתעסקת בקצרה בעברית, ותן חוות דעת פיננסית אישית, מקצועית ומנומקת עליה בהתאם לנתונים."
                             )
                             ai_opinion = ask_gemini(ai_prompt)
                             
