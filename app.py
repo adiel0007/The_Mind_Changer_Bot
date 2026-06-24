@@ -132,7 +132,7 @@ st.markdown("""
         font-size: 1.05rem !important;
         padding: 12px 40px !important;
         border-radius: 30px !important;
-        border: 1px solid #3b82f6 !important;
+        border: none !important;
         width: auto !important;
         min-width: 240px !important;
         margin: 15px auto 0 auto !important;
@@ -172,18 +172,18 @@ st.markdown("""
         text-align: right !important;
     }
 
-    /* עיצוב הטבלאות, מרכוז אבסולוטי לצמצום חורים מרווחים */
+    /* עיצוב הטבלאות ומרכוז אבסולוטי למניעת מרווחים */
     div[data-testid="stDataFrame"] {
         background-color: #ffffff !important;
         border-radius: 12px !important;
         overflow: hidden !important;
-        max-width: 450px !important; /* צמצום נוסף של הרוחב עקב הסרת ה-RSI */
-        margin: 25px auto !important; /* מזיז את הטבלה לאמצע בדיוק */
+        max-width: 450px !important; 
+        margin: 25px auto !important; 
         box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important;
     }
     
     div[data-testid="stDataFrame"] td, div[data-testid="stDataFrame"] th {
-        text-align: center !important; /* מרכוז הנתונים בפנים */
+        text-align: center !important; 
         font-weight: 600 !important;
         padding: 10px 15px !important;
     }
@@ -355,7 +355,7 @@ with tab2:
                     try:
                         if ticker not in data.columns.levels[0]: continue
                         df = data[ticker].dropna()
-                        if len(df) < 5: continue
+                        if len(df) < 15: continue
                         
                         current_price = float(df['Close'].iloc[-1])
                         
@@ -367,12 +367,23 @@ with tab2:
                         last_rsi = float(df['RSI'].iloc[-1])
                         if np.isnan(last_rsi) or last_rsi >= 70: continue
                         
-                        # קריטריון חדש: מחיר סגירה של היום (1-) ואתמול (2-) גבוה מהיום השלישי שלפני האחרון (3-)
+                        # קריטריון 3: מחיר סגירה של היום (1-) ואתמול (2-) גבוה מהיום השלישי שלפני האחרון (3-)
                         close_day1 = float(df['Close'].iloc[-1])
                         close_day2 = float(df['Close'].iloc[-2])
                         close_day3 = float(df['Close'].iloc[-3])
+                        if not ((close_day1 > close_day3) and (close_day2 > close_day3)): continue
                         
-                        if (close_day1 > close_day3) and (close_day2 > close_day3):
+                        # קריטריון חדש: היסחרות ב-5 ימי המסחר האחרונים מתחת לממוצע 9 (MA9) בנרות יומיים
+                        df['MA9'] = df['Close'].rolling(window=9).mean()
+                        
+                        # בדיקת 5 הימים האחרונים ברצף
+                        under_ma9_5days = True
+                        for i in range(1, 6):
+                            if float(df['Close'].iloc[-i]) >= float(df['MA9'].iloc[-i]):
+                                under_ma9_5days = False
+                                break
+                        
+                        if under_ma9_5days:
                             stage1_passed_long.append({"ticker": ticker, "price": current_price})
                     except: continue
                     progress_bar_long.progress((idx + 1) / len(tickers))
@@ -394,7 +405,7 @@ with tab2:
                         tc = opt.calls['volume'].fillna(0).sum()
                         tp = opt.puts['volume'].fillna(0).sum()
                         
-                        # קריטריון 3: יחס אופציות קול (Calls) גדול מפוט (Puts)
+                        # יחס אופציות קול (Calls) גדול מפוט (Puts)
                         if tc > tp:
                             final_long.append(s)
                 except: pass
@@ -402,10 +413,8 @@ with tab2:
         if final_long:
             st.balloons()
             df_long_display = pd.DataFrame(final_long[:10])
-            df_long_display = df_long_display[["ticker", "price"]] # עמודת RSI נמחקה לחלוטין (שינוי 1)
+            df_long_display = df_long_display[["ticker", "price"]] 
             df_long_display.columns = ["סימול", "מחיר נוכחי"]
-            
-            # הצגת הטבלה הממורכזת והמצומצמת (שינוי 2)
             st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
