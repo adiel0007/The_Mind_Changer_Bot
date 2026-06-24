@@ -198,7 +198,6 @@ st.markdown("""
 # פונקציה חכמה לטעינת רשימת המניות מתוך קובץ הטקסט
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
-        # יצירת קובץ ברירת מחדל אם הוא לא קיים
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
         with open(FILENAME, "w") as f:
             f.write("\n".join(default_stocks))
@@ -257,7 +256,6 @@ with tab1:
                     last_price = float(close_prices.iloc[-1])
                     ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                     
-                    # תנאי סינון שורט: מניה שנסחרת מתחת לממוצע הנעים שלה
                     if last_price < ma9:
                         short_data.append({
                             "סימול": ticker,
@@ -289,7 +287,6 @@ with tab2:
                     last_price = float(close_prices.iloc[-1])
                     ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                     
-                    # תנאי סינון לונג: מניה שנסחרת מעל לממוצע הנעים שלה
                     if last_price > ma9:
                         long_data.append({
                             "סימול": ticker,
@@ -368,6 +365,7 @@ with tab3:
             final_elapsed = time.time() - start_time
             show_results = True
 
+        # ---- תצוגת הפלט הסופית המעוצבת והמוגנת (מניעת פגיעת שרשראות f-string) ----
         if show_results and active_ticker:
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             
@@ -381,7 +379,29 @@ with tab3:
             """, unsafe_allow_html=True)
                 
             st.markdown('<hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;">', unsafe_allow_html=True)
+            
+            # הצגת המדדים מופרדת כדי למנוע את קריסת ה-SyntaxError לצמיתות
             st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="metric-row"><span class="metric-label">2. ניתוח ממוצעים נעים:</span><span class="metric-value">{ma_status}</span></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="metric-row"><span class="metric-label">3. שוק האופציות (סנטימנט באחוזים):</span><span class="metric-value">{options_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות:</span><span class="metric-value">{earnings
+            st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות:</span><span class="metric-value">{earnings_status}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">5. צפי דוחות וצמיחה:</span><span class="metric-value">{next_quarter_status}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק (באחוזים):</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
+            
+            st.markdown('<div style="margin-top:20px; padding:15px; background: rgba(255,255,255,0.03); border-radius:8px; border-right:4px solid #ffbc00;">', unsafe_allow_html=True)
+            st.markdown('<h4 style="color:#ffffff;">7. פעילות החברה & חוות דעת אנליסט AI (תקציר ממוקד):</h4>', unsafe_allow_html=True)
+            st.markdown(f'<p style="line-height:1.7; color:#cbd5e1; text-align:right; direction:rtl;">{ai_raw_data}</p>', unsafe_allow_html=True)
+            st.markdown('</div>')
+            st.markdown(f'<p style="color:#94a3b8; font-size:0.9rem; margin-top:15px; text-align:left;">⏱️ החיפוש והניתוח הושלמו בהצלחה בתוך {final_elapsed:.2f} שניות.</p>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="search-section">', unsafe_allow_html=True)
+        user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
+        run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if run_ai and user_q:
+            with st.spinner("ה-AI חושב ומנתח..."):
+                answer = ask_gemini_with_retry(user_q)
+                st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
