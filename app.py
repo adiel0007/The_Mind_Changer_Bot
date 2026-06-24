@@ -15,9 +15,123 @@ FILENAME = "Stocks List.txt"
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # הגדרת עיצוב הדף של Streamlit לחוויה מעולה בנייד ובמחשב
-st.set_page_config(page_title="Radar System", page_icon="📊", layout="wide")
+st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
-# --- פונקציות מתמטיות וטעינה (ללא שינוי מהבוט שלך) ---
+# ==========================================
+#          עיצוב מותאם אישית (CSS)
+# ==========================================
+st.markdown("""
+    <style>
+    /* רקע כללי וצבעי בסיס */
+    .stApp {
+        background-color: #0d1117;
+        color: #c9d1d9;
+    }
+    
+    /* עיצוב כותרת ראשית ענקית - THE MIND CHANGER */
+    .main-title {
+        font-family: 'Inter', sans-serif;
+        font-size: 3.5rem !important;
+        font-weight: 900;
+        letter-spacing: -1px;
+        background: linear-gradient(90deg, #ffbc00 0%, #ff8800 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        margin-top: 10px;
+        margin-bottom: 5px;
+    }
+    
+    .sub-title {
+        font-size: 1.2rem;
+        color: #8b949e;
+        text-align: center;
+        margin-bottom: 40px;
+        font-weight: 300;
+    }
+    
+    /* עיצוב כרטיסיות (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        justify-content: center;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px 8px 0px 0px;
+        padding: 10px 20px;
+        color: #8b949e;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #ffffff;
+        background-color: #21262d;
+        border-color: #8b949e;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1f2937 !important;
+        color: #ffbc00 !important;
+        border-color: #ffbc00 !important;
+    }
+
+    /* עיצוב תיבות תוכן וכפתורים */
+    div.stButton > button {
+        background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+        color: #ffffff;
+        border: 1px solid #4b5563;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: bold;
+        width: 100%;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    div.stButton > button:hover {
+        border-color: #ffbc00;
+        color: #ffbc00;
+        box-shadow: 0 10px 15px -3px rgba(255, 188, 0, 0.1);
+        transform: translateY(-2px);
+    }
+    
+    /* כפתור שורט ייעודי - אדום */
+    .short-btn div.stButton > button {
+        background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%);
+        border: 1px solid #ef4444;
+    }
+    .short-btn div.stButton > button:hover {
+        border-color: #ffffff;
+        color: #ffffff;
+        box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
+    }
+
+    /* כפתור לונג ייעודי - ירוק */
+    .long-btn div.stButton > button {
+        background: linear-gradient(135deg, #065f46 0%, #064e3b 100%);
+        border: 1px solid #10b981;
+    }
+    .long-btn div.stButton > button:hover {
+        border-color: #ffffff;
+        color: #ffffff;
+        box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
+    }
+
+    /* עיצוב טבלאות נתונים */
+    .stDataFrame {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+    }
+    
+    /* התאמות טקסט מימין לשמאל עבור עברית */
+    .rtl-text {
+        direction: rtl;
+        text-align: right;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- פונקציות מתמטיות וטעינה ---
 def get_all_tickers():
     if os.path.exists(FILENAME):
         try:
@@ -35,17 +149,6 @@ def calculate_rsi(close_prices, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def get_analyst_data(ticker_obj):
-    try:
-        info = ticker_obj.info
-        total = int(info.get('numberOfAnalystOpinions', 0))
-        mean_score = info.get('recommendationMean', None)
-        if total > 0 and mean_score is not None:
-            buy_pct = ((5.0 - float(mean_score)) / 4.0) * 100
-            return int(buy_pct), total
-    except: pass
-    return 0, 0
-
 def ask_gemini(question):
     try:
         system_instruction = "אתה אנליסט פיננסי בכיר. ענה בעברית מקצועית, מדויקת וממוקדת שוק ההון."
@@ -58,27 +161,30 @@ def ask_gemini(question):
     except Exception as e:
         return f"⚠️ שגיאה בחיבור ל-AI: {str(e)}"
 
-# --- עיצוב ממשק המשתמש של האפליקציה (UI) ---
-st.title("📊 מערכת רדאר מניות מתקדמת")
-st.write("ברוך הבא אדיאל. כאן תוכל להריץ את סורקי הלונג והשורט או לנתח מניה בודדת 24/7.")
+# --- כותרת ראשית מעוצבת של האתר ---
+st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">מערכת רדאר מתקדמת לסריקת מניות וניתוח AI בזמן אמת</div>', unsafe_allow_html=True)
 
-# חלוקה לכרטיסיות (Tabs) בתוך האתר
+# חלוקה לכרטיסיות (Tabs)
 tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדאר לונג", "🔍 ניתוח מניה בודדת & AI"])
 
 # ==================== כרטיסיית רדאר שורט ====================
 with tab1:
-    st.header("🐻 סורק מניות לשורט (Short Swing)")
-    st.write("טווח: 15$-450$ | 3 ימים אדומים | RSI > 30 | מתחת ל-MA9 או MA100 | ווליום מתגבר | אופציות Put > 50%")
+    st.markdown('<div class="rtl-text"><h3>🐻 סורק מניות לשורט (Short Swing)</h3>'
+                '<p style="color:#8b949e;">טווח: 15$-450$ | 3 ימים אדומים | RSI > 30 | מתחת ל-MA9 או MA100 | ווליום מתגבר | אופציות Put > 50%</p></div>', unsafe_allow_html=True)
     
-    if st.button("🚀 הפעל סריקת שורט"):
+    # שימוש ב-container ייעודי לצבע כפתור אדום לשורט
+    st.markdown('<div class="short-btn">', unsafe_allow_html=True)
+    run_short = st.button("🚀 הפעל סריקת שורט")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if run_short:
         tickers = get_all_tickers()
         st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
         
-        # הרצת הלוגיקה שלך
         progress_bar = st.progress(0)
         stage1_passed = []
         
-        # הורדת הנתונים במכה אחת (מתואם ספליטים)
         with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים..."):
             try:
                 data = yf.download(tickers, period="6mo", group_by='ticker', progress=False, auto_adjust=True)
@@ -96,13 +202,11 @@ with tab1:
                         last_rsi = float(df['RSI'].iloc[-1])
                         if np.isnan(last_rsi) or last_rsi < 30: continue
                         
-                        # 3 ימים אדומים
                         day1 = df['Close'].iloc[-1] - df['Close'].iloc[-2]
                         day2 = df['Close'].iloc[-2] - df['Close'].iloc[-3]
                         day3 = df['Close'].iloc[-3] - df['Close'].iloc[-4]
                         
                         if day1 < 0 and day2 < 0 and day3 < 0:
-                            # ממוצעים ונפח
                             df['MA9'] = df['Close'].rolling(window=9).mean()
                             df['MA100'] = df['Close'].rolling(window=100).mean()
                             df['Avg_Vol'] = df['Volume'].rolling(window=15).mean()
@@ -125,7 +229,6 @@ with tab1:
             st.success(f"מצאתי {len(stage1_passed)} מניות שעברו סינון טכני. בודק שוק אופציות...")
             final_short = []
             
-            # שלב אופציות Put > Call
             for s in stage1_passed:
                 try:
                     t = yf.Ticker(s['ticker'])
@@ -146,7 +249,6 @@ with tab1:
                 final_short = sorted(final_short, key=lambda x: x['put_pct'], reverse=True)[:10]
                 st.balloons()
                 
-                # תצוגה בטבלה מעוצבת באתר
                 df_display = pd.DataFrame(final_short)
                 df_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי", "אחוז אופציות PUT"]
                 st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}", "אחוז אופציות PUT": "{:.1f}%"}), use_container_width=True)
@@ -155,18 +257,24 @@ with tab1:
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
-    st.header("🐂 סורק מניות ללונג (Long)")
-    st.write("לחץ על הכפתור כדי לסרוק הזדמנויות קנייה מתוך רשימת המניות שלך.")
-    if st.button("🚀 הפעל סריקת לונג"):
+    st.markdown('<div class="rtl-text"><h3>🐂 סורק מניות ללונג (Long Swing)</h3>'
+                '<p style="color:#8b949e;">סריקת הזדמנויות קנייה ודוחות מושלמים מתוך רשימת המניות שלך.</p></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="long-btn">', unsafe_allow_html=True)
+    run_long = st.button("🚀 הפעל סריקת לונג")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if run_long:
         st.info("רדאר הלונג בבנייה קלה, בקרוב יוצגו כאן נתוני הקניות והדוחות המושלמים!")
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
-    st.header("🤖 ניתוח מניה ומנוע שאלות AI")
+    st.markdown('<div class="rtl-text"><h3>🤖 ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        search_ticker = st.text_input("הזן שם מניה לניתוח טכני מהיר (למשל NFLX, AAPL):").upper().strip()
+        st.markdown('<div class="rtl-text" style="font-weight:bold;">ניתוח טכני מהיר:</div>', unsafe_allow_html=True)
+        search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
         if st.button("🔍 נתח מניה"):
             if search_ticker:
                 with st.spinner("מושך נתונים..."):
@@ -182,11 +290,13 @@ with tab3:
                 st.warning("אנא הזן סימול.")
                 
     with col2:
-        user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות וכלכליות חופשיות:")
+        st.markdown('<div class="rtl-text" style="font-weight:bold;">שאל את האנליסט AI:</div>', unsafe_allow_html=True)
+        user_q = st.text_input("שאל שאלות פיננסיות וכלכליות חופשיות:", key="ask_input")
         if st.button("🧠 שאל את האנליסט"):
             if user_q:
                 with st.spinner("ה-AI חושב ומנתח..."):
                     answer = ask_gemini(user_q)
-                    st.markdown(f"### 📋 תשובת האנליסט:\n{answer}")
+                    st.markdown(f'<div class="rtl-text" style="background-color:#161b22; padding:20px; border-radius:8px; border:1px solid #30363d;">'
+                                f'<h4>📋 תשובת האנליסט:</h4><p>{answer}</p></div>', unsafe_allow_html=True)
             else:
                 st.warning("אנא הקלד שאלה תחילה.")
