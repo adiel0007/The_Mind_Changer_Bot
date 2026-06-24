@@ -476,7 +476,7 @@ with tab2:
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
-# ==================== כרטיסיית מניה בודדת ו-AI (שדרוג המדדים) ====================
+# ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
     st.markdown('<div class="center-header-block">'
                 '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
@@ -496,11 +496,21 @@ with tab3:
             with analysis_container:
                 if search_ticker:
                     with st.spinner("מושך נתונים ומחשב מדדי מפתח..."):
-                        t = yf.download(search_ticker, period="6mo", auto_adjust=True)
+                        # שימוש ב-group_by מבטיח שליפה יציבה ומונע באגים במבנה העמודות
+                        t = yf.download(search_ticker, period="6mo", group_by='ticker', auto_adjust=True)
+                        
                         if not t.empty:
+                            # אם חזר מבנה עם MultiIndex, ננקה אותו
+                            if isinstance(t.columns, pd.MultiIndex):
+                                if search_ticker in t.columns.levels[0]:
+                                    df_stock = t[search_ticker].dropna()
+                                else:
+                                    df_stock = t.dropna()
+                            else:
+                                df_stock = t.dropna()
+                                
                             # חילוץ סדרת המחירים
-                            close_prices = t['Close'].squeeze()
-                            df_stock = pd.DataFrame(t).dropna()
+                            close_prices = df_stock['Close'].squeeze()
                             
                             # 1. חישוב מחיר ו-RSI
                             rsi_values = calculate_rsi(close_prices)
@@ -513,11 +523,16 @@ with tab3:
                             last_ma9 = float(df_stock['MA9'].iloc[-1])
                             last_ma100 = float(df_stock['MA100'].iloc[-1]) if len(df_stock) >= 100 else 0
                             
-                            # 3. חישוב ווליום נוכחי וממוצע 15 ימים
-                            df_stock['Avg_Vol'] = df_stock['Volume'].rolling(window=15).mean()
-                            last_vol = float(df_stock['Volume'].iloc[-1])
-                            avg_vol = float(df_stock['Avg_Vol'].iloc[-1])
-                            vol_status = "🟢 מתגבר (מעל הממוצע)" if last_vol > avg_vol else "🔴 חלש (מתחת לממוצע)"
+                            # 3. חישוב ווליום בצורה בטוחה (מניעת KeyError)
+                            last_vol = 0
+                            avg_vol = 0
+                            vol_status = "אין נתוני מחזור מסחר"
+                            
+                            if 'Volume' in df_stock.columns:
+                                df_stock['Avg_Vol'] = df_stock['Volume'].rolling(window=15).mean()
+                                last_vol = float(df_stock['Volume'].iloc[-1])
+                                avg_vol = float(df_stock['Avg_Vol'].iloc[-1]) if not np.isnan(df_stock['Avg_Vol'].iloc[-1]) else last_vol
+                                vol_status = "🟢 מתגבר (מעל הממוצע)" if last_vol > avg_vol else "🔴 חלש (מתחת לממוצע)"
                             
                             # 4. בדיקת 3 ימים אדומים רצופים
                             day1 = close_prices.iloc[-1] - close_prices.iloc[-2]
@@ -535,8 +550,10 @@ with tab3:
                             
                             ma100_display = f"${last_ma100:.2f}" if last_ma100 > 0 else "אין מספיק דאטה"
                             st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע נע 100 (MA100):</span><span class="metric-value">{ma100_display}</span></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="metric-row"><span class="metric-label">מחזור מסחר (Volume):</span><span class="metric-value">{last_vol:,.0f}</span></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע מחזור (15 ימים):</span><span class="metric-value">{avg_vol:,.0f}</span></div>', unsafe_allow_html=True)
+                            
+                            if last_vol > 0:
+                                st.markdown(f'<div class="metric-row"><span class="metric-label">מחזור מסחר (Volume):</span><span class="metric-value">{last_vol:,.0f}</span></div>', unsafe_allow_html=True)
+                                st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע מחזור (15 ימים):</span><span class="metric-value">{avg_vol:,.0f}</span></div>', unsafe_allow_html=True)
                             st.markdown(f'<div class="metric-row"><span class="metric-label">סטטוס ווליום:</span><span class="metric-value">{vol_status}</span></div>', unsafe_allow_html=True)
                             st.markdown(f'<div class="metric-row"><span class="metric-label">רצף 3 ימים אדומים:</span><span class="metric-value">{is_3_days_red}</span></div>', unsafe_allow_html=True)
                             st.markdown('</div>', unsafe_allow_html=True)
