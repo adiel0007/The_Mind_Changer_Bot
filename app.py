@@ -90,7 +90,6 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* עיצוב הטאבים - יישור הטקסט לימין ודחיפת הסמיילים/אייקונים לצד שמאל באופן אבסולוטי */
     .stTabs [data-baseweb="tab-list"] {
         gap: 16px;
         justify-content: center !important;
@@ -102,7 +101,7 @@ st.markdown("""
         font-weight: 800 !important;  
         color: #94a3b8 !important;
         display: flex !important;
-        flex-direction: row-reverse !important; /* דוחף את האייקון/סמיילי שמאלה לסוף המשפט */
+        flex-direction: row-reverse !important;
         align-items: center !important;
         gap: 10px !important;
     }
@@ -118,7 +117,6 @@ st.markdown("""
         padding: 12px 28px !important;
     }
     
-    /* עיצוב כפתור הסריקה המרכזי שיופיע למטה */
     div.stButton > button {
         background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
         color: #ffffff !important;
@@ -329,26 +327,27 @@ if run_radar:
     t_step1 = time.time() - t_start
     st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 1: טעינת רשימת המניות מהקובץ</span><span class="metric-value">{t_step1:.2f} שניות</span></div>')
     
-    # 🔄 שלב 2 + 3: הורדה קבוצתית מיידית במכה אחת (חסין חסימות 100%)
+    # 🔄 שלב 2 + 3: הורדה קבוצתית מיידית וחסינת מניות מחוקות
     t_start = time.time()
     temp_short = []
     temp_long = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.markdown("<span style='color:#00f2fe; font-weight:700;'>🚀 משגר פקודת הורדה קבוצתית (Batch Download) חסינת חסימות לכל השוק...</span>", unsafe_allow_html=True)
+    status_text.markdown("<span style='color:#00f2fe; font-weight:700;'>🚀 משגר פקודת הורדה קבוצתית חסינה לכל השוק...</span>", unsafe_allow_html=True)
     progress_bar.progress(30)
     
     try:
-        # פקודת הורדה קבוצתית חכמה שחוסכת לולאות ומורידה הכל בשנייה אחת
         tickers_str = " ".join(tickers)
-        all_data = yf.download(tickers_str, period="1mo", interval="1d", group_by='ticker', auto_adjust=True, progress=False)
+        # שימוש בפרמטר ignore_tz=True למניעת שגיאות והורדה קבוצתית מרובת עמודות
+        all_data = yf.download(tickers_str, period="1mo", interval="1d", group_by='ticker', auto_adjust=True, progress=False, ignore_tz=True)
         
         progress_bar.progress(70)
-        status_text.markdown("<span style='color:#ffffff;'>🎯 מעבד ומנתח מומנטום טכני לכל מניה...</span>", unsafe_allow_html=True)
+        status_text.markdown("<span style='color:#ffffff;'>🎯 מעבד ומסנן מניות פעילות בלבד...</span>", unsafe_allow_html=True)
         
         for ticker in tickers:
             try:
+                # מניעת קריסה: בודק באופן מפורש אם המניה אכן קיימת בתוצאות שהתקבלו מ-Yahoo
                 if ticker in all_data.columns.levels[0]:
                     df_ticker = all_data[ticker].dropna()
                     if not df_ticker.empty and len(df_ticker) >= 14:
@@ -358,7 +357,7 @@ if run_radar:
                         rsi = calculate_rsi_series(close_prices)
                         volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
                         
-                        # קריטריון שורט
+                        # קריטריון סינון לשורט
                         if last_price < ma9 and volume > 1000000:
                             if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
                             elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
@@ -368,7 +367,7 @@ if run_radar:
                                 "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
                             })
                         
-                        # קריטריון לונג
+                        # קריטריון סינון ללונג
                         elif last_price > ma9 and rsi > 45 and volume > 1000000:
                             temp_long.append({
                                 "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
@@ -382,17 +381,17 @@ if run_radar:
     status_text.empty()
     
     t_step2_3 = time.time() - t_start
-    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 2 + 3: קריאה קבוצתית וחישוב אינדיקטורים לכל המניות במקביל</span><span class="metric-value">{t_step2_3:.2f} שניות</span></div>')
+    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 2 + 3: סינון וקריאה קבוצתית (התעלמות ממניות מבוטלות)</span><span class="metric-value">{t_step2_3:.2f} שניות</span></div>')
     
-    # 📊 שלב 4: נעילת הנתונים על המסך
+    # 📊 שלב 4: שמירה ונעילת הנתונים על המסך
     t_start = time.time()
     st.session_state.short_list = temp_short
     st.session_state.long_list = temp_long
     st.session_state.radar_scanned = True
     t_step4 = time.time() - t_start
-    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 4: יצירת מבנה הטבלאות ונעילת התוצאות הסופיות על המסך</span><span class="metric-value">{t_step4:.2f} שניות</span></div>')
+    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 4: יצירת מבנה הטבלאות ונעילת התוצאות הסופיות</span><span class="metric-value">{t_step4:.2f} שניות</span></div>')
 
-# הצגת לוג הזמנים והשלבים המלא (נשאר קבוע ויציב על המסך!)
+# הצגת לוג הזמנים והשלבים המלא
 if st.session_state.steps_log:
     st.markdown('<div class="result-box" style="max-width: 800px; margin: 20px auto;">', unsafe_allow_html=True)
     st.markdown('<h3 style="color:#00f2fe; text-align:center;">📋 סיכום שלבי סריקת המומנטום ומדדי הזמן</h3>', unsafe_allow_html=True)
