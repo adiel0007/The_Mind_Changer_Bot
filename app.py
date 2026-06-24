@@ -172,19 +172,18 @@ st.markdown("""
         text-align: right !important;
     }
 
-    /* עיצוב ותיקון מרווחי הטבלאות לצמצום חורים ענקיים וישור מושלם לימין */
+    /* עיצוב הטבלאות, מרכוז אבסולוטי לצמצום חורים מרווחים */
     div[data-testid="stDataFrame"] {
         background-color: #ffffff !important;
         border-radius: 12px !important;
         overflow: hidden !important;
-        max-width: 650px !important; /* הגבלת הרוחב הכללי של הטבלה למראה ממוקד */
-        margin: 25px auto !important; /* מרכוז הטבלה בעמוד */
+        max-width: 450px !important; /* צמצום נוסף של הרוחב עקב הסרת ה-RSI */
+        margin: 25px auto !important; /* מזיז את הטבלה לאמצע בדיוק */
         box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important;
     }
     
-    /* הזרקת הגדרות ישירות לתאי המידע בטבלה */
     div[data-testid="stDataFrame"] td, div[data-testid="stDataFrame"] th {
-        text-align: right !important;
+        text-align: center !important; /* מרכוז הנתונים בפנים */
         font-weight: 600 !important;
         padding: 10px 15px !important;
     }
@@ -276,7 +275,6 @@ with tab1:
                         if len(df) < 110: continue
                         
                         current_price = float(df['Close'].iloc[-1])
-                        # שינוי טווח מחירים מ-15 עד 450 כולל ספליטים (סעיף 1)
                         if not (15 <= current_price <= 450): continue
                         
                         df['RSI'] = calculate_rsi(df['Close'])
@@ -298,7 +296,7 @@ with tab1:
                             avg_vol = df['Avg_Vol'].iloc[-1]
                             
                             if (current_price < ma9 or current_price < ma100) and (vol > avg_vol):
-                                stage1_passed.append({"ticker": ticker, "price": current_price, "rsi": last_rsi})
+                                stage1_passed.append({"ticker": ticker, "price": current_price})
                     except: continue
                     progress_bar.progress((idx + 1) / len(tickers))
             except Exception as e:
@@ -322,18 +320,15 @@ with tab1:
                         if total > 100:
                             put_pct = (tp / total) * 100
                             if put_pct > 50:
-                                s['put_pct'] = put_pct
                                 final_short.append(s)
                 except: pass
                 
             if final_short:
-                final_short = sorted(final_short, key=lambda x: x['put_pct'], reverse=True)[:10]
                 st.balloons()
-                df_display = pd.DataFrame(final_short)
-                df_display = df_display[["ticker", "price", "rsi"]]
-                df_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי"]
-                # הצגת הטבלה המצומצמת והמסודרת
-                st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=False)
+                df_display = pd.DataFrame(final_short[:10])
+                df_display = df_display[["ticker", "price"]]
+                df_display.columns = ["סימול", "מחיר נוכחי"]
+                st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
             else:
                 st.warning("אף מניה לא עברה את סינון האופציות (Put > Call).")
 
@@ -360,19 +355,25 @@ with tab2:
                     try:
                         if ticker not in data.columns.levels[0]: continue
                         df = data[ticker].dropna()
-                        if len(df) < 50: continue
+                        if len(df) < 5: continue
                         
                         current_price = float(df['Close'].iloc[-1])
-                        # שינוי 1: טווח מחיר 15-450 כולל ספליטים
+                        
+                        # קריטריון 1: טווח מחיר 15-450 כולל ספליטים
                         if not (15 <= current_price <= 450): continue
                         
+                        # קריטריון 2: מדד RSI חייב להיות מתחת ל-70 בנר יום האחרון
                         df['RSI'] = calculate_rsi(df['Close'])
                         last_rsi = float(df['RSI'].iloc[-1])
-                        
-                        # שינוי 2: מדד RSI חייב להיות מתחת ל-70 בנר יום האחרון
                         if np.isnan(last_rsi) or last_rsi >= 70: continue
                         
-                        stage1_passed_long.append({"ticker": ticker, "price": current_price, "rsi": last_rsi})
+                        # קריטריון חדש: מחיר סגירה של היום (1-) ואתמול (2-) גבוה מהיום השלישי שלפני האחרון (3-)
+                        close_day1 = float(df['Close'].iloc[-1])
+                        close_day2 = float(df['Close'].iloc[-2])
+                        close_day3 = float(df['Close'].iloc[-3])
+                        
+                        if (close_day1 > close_day3) and (close_day2 > close_day3):
+                            stage1_passed_long.append({"ticker": ticker, "price": current_price})
                     except: continue
                     progress_bar_long.progress((idx + 1) / len(tickers))
             except Exception as e:
@@ -393,7 +394,7 @@ with tab2:
                         tc = opt.calls['volume'].fillna(0).sum()
                         tp = opt.puts['volume'].fillna(0).sum()
                         
-                        # שינוי 3: יחס האופציות על המניה - קולים (Calls) חייב להיות גדול מהפוטים (Puts)
+                        # קריטריון 3: יחס אופציות קול (Calls) גדול מפוט (Puts)
                         if tc > tp:
                             final_long.append(s)
                 except: pass
@@ -401,10 +402,11 @@ with tab2:
         if final_long:
             st.balloons()
             df_long_display = pd.DataFrame(final_long[:10])
-            df_long_display = df_long_display[["ticker", "price", "rsi"]]
-            df_long_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי"]
-            # סעיף 4: הצגת טבלה מצומצמת ויפה ללא חורים ריקים
-            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=False)
+            df_long_display = df_long_display[["ticker", "price"]] # עמודת RSI נמחקה לחלוטין (שינוי 1)
+            df_long_display.columns = ["סימול", "מחיר נוכחי"]
+            
+            # הצגת הטבלה הממורכזת והמצומצמת (שינוי 2)
+            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
