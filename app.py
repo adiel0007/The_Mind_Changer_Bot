@@ -54,7 +54,14 @@ DOMAINS_MAP = {
 # ==========================================
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght=700;900&family=Inter:wght@400;600;700&display=swap');
+
+    /* 🛠️ הסתרת סרגל הכלים של המפתחים (העלמת כיתוב dev בתחתית המסך) */
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+    div[data-testid="stToolbar"] {display: none !important;}
 
     .stApp {
         background-image: 
@@ -125,15 +132,6 @@ st.markdown("""
         border-radius: 6px 6px 0px 0px !important;
         padding: 12px 28px !important;
     }
-
-    .cyber-box {
-        max-width: 750px;
-        margin: 30px auto;
-        padding: 40px 30px;
-        background: rgba(11, 17, 30, 0.85);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        border-radius: 16px;
-    }
     
     div.stButton > button {
         background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
@@ -181,7 +179,6 @@ st.markdown("""
         font-weight: 700;
     }
     
-    /* קומפוננטת כותרת עם אייקון בצד שמאל קיצוני */
     .header-row-container {
         display: flex;
         justify-content: space-between;
@@ -202,6 +199,21 @@ st.markdown("""
     }
     .header-emoji {
         font-size: 1.6rem;
+    }
+    
+    /* קומפוננטת עיגול לוגו מינימליסטי ויוקרתי במקרה ששרת הלוגואים חסום */
+    .clean-fallback-logo {
+        width: 42px;
+        height: 42px;
+        background: #1e293b;
+        color: #ffffff;
+        font-size: 0.95rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,0.15);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -266,8 +278,17 @@ with tab3:
                 next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לקונזנזוס השוק"
                 recommendation_status = "קנייה חזקה 🔥 (כ-88% מהאנליסטים ממליצים לונג)"
                 
-                # חילוץ הלוגו הרשמי המדויק לפי סימול המניה ממקור פיננסי מאובטח
-                logo_url = f"https://images.financialmodelingprep.com/v3/companies/v3/logo/{search_ticker}.png"
+                # חילוץ קשיח ומאובטח של הלוגו ללא תקלות תצוגה
+                domain = DOMAINS_MAP.get(search_ticker, f"{search_ticker.lower()}.com")
+                logo_url = f"https://logo.clearbit.com/{domain}"
+                
+                # יצירת אלמנט הלוגו עם הגנת קריסה מובנית
+                logo_html = f"""
+                    <div style="display: flex; align-items: center; justify-content: center;">
+                        <img src="{logo_url}" width="42" style="border-radius: 50%; background: #ffffff; padding: 2px;" 
+                        onerror="this.onerror=null; this.parentClassName=''; this.outerHTML='<div class=\"clean-fallback-logo\">{search_ticker[:3]}</div>';">
+                    </div>
+                """
                 
                 # ניסיון קריאת נתוני שוק חיים במידה ואין חסימת IP
                 try:
@@ -305,7 +326,7 @@ with tab3:
                     <div class="header-row-container">
                         <div class="header-text-title">סקירת מניית {search_ticker}</div>
                         <div class="header-left-side">
-                            <img src="{logo_url}" width="42" style="border-radius:6px; background:transparent;" onerror="this.style.display='none';">
+                            {logo_html}
                             <div class="header-emoji">📊</div>
                         </div>
                     </div>
