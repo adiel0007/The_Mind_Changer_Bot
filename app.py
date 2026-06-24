@@ -238,14 +238,29 @@ st.markdown("""
         box-shadow: 0 15px 30px rgba(0,0,0,0.5);
     }
 
-    /* תיבת תוצאות */
+    /* תיבת תוצאות יפה לניתוח טכני ו-AI */
     .result-box {
-        background-color: #0f172a; 
-        padding: 25px; 
-        border-radius: 12px; 
-        border: 1px solid #1e293b; 
+        background-color: #0b111e; 
+        padding: 30px; 
+        border-radius: 16px; 
+        border: 1px solid rgba(255, 255, 255, 0.08); 
         margin-top: 25px;
-        box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    .metric-row {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding: 12px 0;
+        font-size: 1.1rem;
+    }
+    .metric-label {
+        color: #94a3b8;
+        font-weight: 600;
+    }
+    .metric-value {
+        color: #ffffff;
+        font-weight: 700;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -262,7 +277,6 @@ def get_all_tickers():
     return ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
 
 def calculate_rsi(close_prices, period=14):
-    # הבטחה שקבוצת המחירים היא סדרת פנדס שטוחה ונקייה
     close_series = pd.Series(close_prices).squeeze()
     delta = close_series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -403,21 +417,21 @@ with tab2:
                         
                         current_price = float(df['Close'].iloc[-1])
                         
-                        # קריטריון 1: טווח מחיר 15-450 כולל ספליטים
+                        # קריטריון 1: טווח מחיר 15-450
                         if not (15 <= current_price <= 450): continue
                         
-                        # קריטריון 2: מדד RSI חייב להיות מתחת ל-70 בנר יום האחרון
+                        # קריטריון 2: מדד RSI מתחת ל-70
                         df['RSI'] = calculate_rsi(df['Close'])
                         last_rsi = float(df['RSI'].iloc[-1])
                         if np.isnan(last_rsi) or last_rsi >= 70: continue
                         
-                        # קריטריון 3: מחיר סגירה של היום (1-) ואתמול (2-) גבוה מהיום השלישי שלפני האחרון (3-)
+                        # קריטריון 3: השוואת נרות סגירה
                         close_day1 = float(df['Close'].iloc[-1])
                         close_day2 = float(df['Close'].iloc[-2])
                         close_day3 = float(df['Close'].iloc[-3])
                         if (close_day1 <= close_day3) or (close_day2 <= close_day3): continue
                         
-                        # קריטריון 4: היסחרות מתחת לממוצע נע 9 ב-4 ימי המסחר האחרונים ברציפות
+                        # קריטריון 4: היסחרות מתחת ל-MA9 ב-4 ימי המסחר האחרונים ברציפות
                         df['MA9'] = df['Close'].rolling(window=9).mean()
                         
                         under_ma9_day1 = float(df['Close'].iloc[-1]) < float(df['MA9'].iloc[-1])
@@ -449,7 +463,6 @@ with tab2:
                         tc = opt.calls['volume'].fillna(0).sum()
                         tp = opt.puts['volume'].fillna(0).sum()
                         
-                        # קריטריון אופציות: יחס אופציות קול (Calls) גדול מפוט (Puts)
                         if tc > tp:
                             final_long.append(s)
                 except: pass
@@ -459,12 +472,11 @@ with tab2:
             df_long_display = pd.DataFrame(final_long[:10])
             df_long_display = df_long_display[["ticker", "price"]] 
             df_long_display.columns = ["סימול", "מחיר נוכחי"]
-            
             st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
-# ==================== כרטיסיית מניה בודדת ו-AI ====================
+# ==================== כרטיסיית מניה בודדת ו-AI (שדרוג המדדים) ====================
 with tab3:
     st.markdown('<div class="center-header-block">'
                 '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
@@ -483,22 +495,53 @@ with tab3:
         if run_analysis:
             with analysis_container:
                 if search_ticker:
-                    with st.spinner("מושך נתונים..."):
+                    with st.spinner("מושך נתונים ומחשב מדדי מפתח..."):
                         t = yf.download(search_ticker, period="6mo", auto_adjust=True)
                         if not t.empty:
-                            # שימוש ב-squeeze() כדי למנוע את באג ה-MultiIndex
+                            # חילוץ סדרת המחירים
                             close_prices = t['Close'].squeeze()
-                            rsi_values = calculate_rsi(close_prices)
+                            df_stock = pd.DataFrame(t).dropna()
                             
+                            # 1. חישוב מחיר ו-RSI
+                            rsi_values = calculate_rsi(close_prices)
                             last_price = float(close_prices.iloc[-1])
                             last_rsi = float(rsi_values.iloc[-1])
                             
+                            # 2. חישוב ממוצעים נעים 9 ו-100
+                            df_stock['MA9'] = close_prices.rolling(window=9).mean()
+                            df_stock['MA100'] = close_prices.rolling(window=100).mean()
+                            last_ma9 = float(df_stock['MA9'].iloc[-1])
+                            last_ma100 = float(df_stock['MA100'].iloc[-1]) if len(df_stock) >= 100 else 0
+                            
+                            # 3. חישוב ווליום נוכחי וממוצע 15 ימים
+                            df_stock['Avg_Vol'] = df_stock['Volume'].rolling(window=15).mean()
+                            last_vol = float(df_stock['Volume'].iloc[-1])
+                            avg_vol = float(df_stock['Avg_Vol'].iloc[-1])
+                            vol_status = "🟢 מתגבר (מעל הממוצע)" if last_vol > avg_vol else "🔴 חלש (מתחת לממוצע)"
+                            
+                            # 4. בדיקת 3 ימים אדומים רצופים
+                            day1 = close_prices.iloc[-1] - close_prices.iloc[-2]
+                            day2 = close_prices.iloc[-2] - close_prices.iloc[-3]
+                            day3 = close_prices.iloc[-3] - close_prices.iloc[-4]
+                            is_3_days_red = "⚠️ כן (3 ימים אדומים ברצף)" if (day1 < 0 and day2 < 0 and day3 < 0) else "❌ לא"
+                            
+                            # תצוגה מעוצבת ונקייה בתוך קובץ ה-HTML
                             st.markdown('<div class="result-box">', unsafe_allow_html=True)
-                            st.metric("מחיר נוכחי", f"${last_price:.2f}")
-                            st.metric("מדד RSI", f"{last_rsi:.1f}")
+                            st.markdown(f'<h3>📋 פרופיל טכני: {search_ticker}</h3>', unsafe_allow_html=True)
+                            
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">מחיר סגירה נוכחי:</span><span class="metric-value">${last_price:.2f}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">מדד RSI (14):</span><span class="metric-value">{last_rsi:.1f}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע נע 9 (MA9):</span><span class="metric-value">${last_ma9:.2f}</span></div>', unsafe_allow_html=True)
+                            
+                            ma100_display = f"${last_ma100:.2f}" if last_ma100 > 0 else "אין מספיק דאטה"
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע נע 100 (MA100):</span><span class="metric-value">{ma100_display}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">מחזור מסחר (Volume):</span><span class="metric-value">{last_vol:,.0f}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">ממוצע מחזור (15 ימים):</span><span class="metric-value">{avg_vol:,.0f}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">סטטוס ווליום:</span><span class="metric-value">{vol_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">רצף 3 ימים אדומים:</span><span class="metric-value">{is_3_days_red}</span></div>', unsafe_allow_html=True)
                             st.markdown('</div>', unsafe_allow_html=True)
                         else:
-                            st.error("המניה לא נמצאה.")
+                            st.error("המניה לא נמצאה בארכיון yfinance.")
                 else:
                     st.warning("אנא הזן סימול.")
                 
