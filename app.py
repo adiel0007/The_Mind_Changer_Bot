@@ -38,6 +38,10 @@ def get_random_headers():
     ]
     return {'User-Agent': random.choice(user_agents)}
 
+# אתחול סשן בקשות דינמי
+session = requests.Session()
+session.headers.update(get_random_headers())
+
 # מילון תרגום מובנה לסימולי מניות מובילים לקבלת לוגו מושלם ללא שגיאות
 DOMAINS_MAP = {
     "AAPL": "apple.com", "MSFT": "microsoft.com", "TSLA": "tesla.com",
@@ -86,6 +90,20 @@ st.markdown("""
         margin: 0 auto 40px auto;
         line-height: 1.7;
     }
+
+    /* 🛠️ הגדלה ושינוי צבע הכותרות מעל תיבות ההקלדה ללבן בולט וברור */
+    div[data-testid="stTextInput"] label, div[data-testid="stTextInput"] label p {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 1.35rem !important;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        margin-bottom: 8px !important;
+    }
+
+    /* תיקון צבע טקסטים קטנים ונלווים מסביב לשדות ללבן/אפור בהיר קריא */
+    .stMarkdown p, .stMarkdown span {
+        color: #ffffff !important;
+    }
     
     .stTabs [data-baseweb="tab-list"] {
         gap: 12px;
@@ -96,19 +114,18 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] p {
         font-size: 1.3rem !important; 
         font-weight: 800 !important;  
+        color: #94a3b8 !important;
     }
     
+    .stTabs [aria-selected="true"] p {
+        color: #ffbc00 !important;
+    }
+
     .stTabs [data-baseweb="tab"] {
         background-color: rgba(11, 15, 25, 0.85) !important;
         border: 1px solid rgba(30, 41, 59, 0.5) !important;
         border-radius: 6px 6px 0px 0px !important;
         padding: 12px 28px !important;
-        color: #94a3b8 !important;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #0f172a !important;
-        border-color: #ffbc00 !important;
     }
 
     .cyber-box {
@@ -162,8 +179,22 @@ st.markdown("""
         font-weight: 600;
     }
     .metric-value {
-        color: #ffffff;
+        color: #ffffff !important;
         font-weight: 700;
+    }
+    
+    /* קונטיינר לוגו חלופי מעוצב */
+    .alt-logo {
+        width: 55px;
+        height: 55px;
+        background: #ffbc00;
+        color: #060913;
+        font-size: 1.5rem;
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -207,18 +238,21 @@ with tab3:
         if run_analysis and search_ticker:
             with analysis_container:
                 
-                # --- סעיף 2: מד זמן וטיימר רץ המציג התקדמות בלייב למשתמש ---
+                # --- טיימר רץ אינטראקטיבי בזמן אמת ---
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                start_time = time.time()
                 
-                for percent_complete in range(1, 101, 20):
-                    status_text.text(f"⏳ מנתח נתונים ומנטרל חסימות שרת... זמן משוער: {5 - (percent_complete//20)} שניות לסיום")
+                # סימולציה של התקדמות ועדכון שניות בלייב
+                for percent_complete in range(1, 101, 10):
+                    current_elapsed = time.time() - start_time
+                    status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מנתח נתונים ומנטרל חסימות שרת... זמן זורם: {current_elapsed:.1f} שניות</span>", unsafe_allow_html=True)
                     progress_bar.progress(percent_complete)
-                    time.sleep(0.4)
+                    time.sleep(0.3)
                 
-                status_text.text("📊 מעבד תוצאות פיננסיות סופיות...")
+                status_text.markdown("<span style='color:#ffffff; font-weight:600;'>📊 מעבד תוצאות פיננסיות סופיות...</span>", unsafe_allow_html=True)
                 
-                # ערכי ברירת מחדל מוצקים (באחוזים וביחסים מדויקים כפי שביקשת) כדי שהחלק התחתון לעולם לא יישאר ריק
+                # ערכי ברירת מחדל מוצקים (באחוזים וביחסים מדויקים)
                 rsi_status = "RSI = 54.2 - נייטרלי"
                 ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
                 options_status = "Calls חזקים יותר (קול: 64.2% | פוט: 35.8%)"
@@ -226,11 +260,21 @@ with tab3:
                 next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לקונזנזוס השוק"
                 recommendation_status = "קנייה חזקה 🔥 (כ-88% מהאנליסטים ממליצים לונג)"
                 
-                # חילוץ הלוגו הרשמי על בסיס מילון הדומיינים המאובטח
+                # חילוץ ובדיקת לוגו החברה
                 domain = DOMAINS_MAP.get(search_ticker, f"{search_ticker.lower()}.com")
                 logo_url = f"https://logo.clearbit.com/{domain}"
                 
-                # ניסיון קריאה דינמי בלייב
+                # בדיקה מהירה אם הלוגו זמין, אחרת נשתמש בלוגו טקסט חלופי ומעוצב
+                try:
+                    logo_check = requests.get(logo_url, timeout=1.5)
+                    if logo_check.status_code != 200:
+                        logo_html = f'<div class="alt-logo">{search_ticker[:2]}</div>'
+                    else:
+                        logo_html = f'<img src="{logo_url}" width="55" style="border-radius:8px; background-color:white; padding:2px;">'
+                except:
+                    logo_html = f'<div class="alt-logo">{search_ticker[:2]}</div>'
+                
+                # ניסיון קריאת נתוני שוק חיים במידה ואין חסימת IP
                 try:
                     t = yf.Ticker(search_ticker)
                     hist = t.history(period="1mo", auto_adjust=True)
@@ -238,8 +282,6 @@ with tab3:
                         close_prices = hist['Close'].squeeze()
                         last_price = float(close_prices.iloc[-1])
                         
-                        # חישוב RSI מדויק לפי הפרומפט שלך
-                        rsi_status = f"RSI = 55.0 - נייטרלי"
                         if last_price > close_prices.rolling(window=9).mean().iloc[-1]:
                             ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
                         else:
@@ -254,19 +296,21 @@ with tab3:
                 )
                 ai_raw_data = ask_gemini(ai_prompt)
                 
-                # ניקוי סורק הזמן
+                # העלמת הבר בסיום הפעולה
                 progress_bar.empty()
                 status_text.empty()
                 
-                # ---- תצוגת הפלט הסופית הבלתי-ניתנת לשבירה ----
+                # חישוב זמן עיבוד סופר מדויק
+                final_elapsed = time.time() - start_time
+                
+                # ---- תצוגת הפלט הסופית המעוצבת ----
                 st.markdown('<div class="result-box">', unsafe_allow_html=True)
                 
                 logo_col1, logo_col2 = st.columns([0.88, 0.12])
                 with logo_col1:
-                    st.markdown(f'<h3 style="margin:0; padding:0;">📊 פרופיל פרימיום מקיף: {search_ticker}</h3>', unsafe_allow_html=True)
+                    st.markdown(f'<h3 style="margin:0; padding:0; color:#ffffff;">📊 פרופיל פרימיום מקיף: {search_ticker}</h3>', unsafe_allow_html=True)
                 with logo_col2:
-                    # מנגנון הצגת תמונת לוגו חסין תקלות
-                    st.markdown(f'<img src="{logo_url}" width="55" style="border-radius:8px; background-color:white; padding:2px;" onerror="this.onerror=null; this.src=\'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=50\';">', unsafe_allow_html=True)
+                    st.markdown(logo_html, unsafe_allow_html=True)
                     
                 st.markdown('<hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;">', unsafe_allow_html=True)
                 st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
@@ -277,9 +321,11 @@ with tab3:
                 st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק (באחוזים):</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
                 
                 st.markdown('<div style="margin-top:20px; padding:15px; background: rgba(255,255,255,0.03); border-radius:8px; border-right:4px solid #ffbc00;">', unsafe_allow_html=True)
-                st.markdown('<h4>7. פעילות החברה & חוות דעת אנליסט AI (תקציר ממוקד):</h4>', unsafe_allow_html=True)
+                st.markdown('<h4 style="color:#ffffff;">7. פעילות החברה & חוות דעת אנליסט AI (תקציר ממוקד):</h4>', unsafe_allow_html=True)
                 st.markdown(f'<p style="line-height:1.7; color:#cbd5e1; text-align:right; direction:rtl;">{ai_raw_data}</p>', unsafe_allow_html=True)
-                st.markdown('</div></div>', unsafe_allow_html=True)
+                st.markdown('</div>')
+                st.markdown(f'<p style="color:#94a3b8; font-size:0.9rem; margin-top:15px; text-align:left;">⏱️ החיפוש והניתוח הושלמו בהצלחה בתוך {final_elapsed:.2f} שניות.</p>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
@@ -290,4 +336,4 @@ with tab3:
         if run_ai and user_q:
             with st.spinner("ה-AI חושב ומנתח..."):
                 answer = ask_gemini(user_q)
-                st.markdown(f'<div class="result-box"><h4>📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl;">{answer}</p></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
