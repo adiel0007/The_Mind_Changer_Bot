@@ -18,7 +18,7 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # ==========================================
-#     מערכת עיצוב פרימיום מתוקנת ומהודקת (RTL)
+#     מערכת עיצוב פרימיום קשיחה וסופית (RTL)
 # ==========================================
 st.markdown("""
     <style>
@@ -36,8 +36,8 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* כפיית כיוון RTL על כל האפליקציה באופן גורף */
-    .stApp, div[data-testid="stVerticalBlock"] {
+    /* כפיית כיוון RTL על כל האפליקציה בצורה גורפת */
+    .stApp, div[data-testid="stVerticalBlock"], div[data-testid="stHorizontalBlock"] {
         direction: rtl !important;
         text-align: right !important;
     }
@@ -66,11 +66,11 @@ st.markdown("""
         direction: rtl !important;
     }
     
-    /* עיצוב והגדלת כרטיסיות (Tabs) באופן קשיח */
+    /* עיצוב והגדלת כרטיסיות (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 12px;
         justify-content: center !important;
-        border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+        border-bottom: 1px solid rgba(30, 41, 59, 0.8) !important;
         direction: rtl !important;
     }
     
@@ -80,25 +80,43 @@ st.markdown("""
     }
     
     .stTabs [data-baseweb="tab"] {
-        background-color: rgba(11, 15, 25, 0.85);
-        border: 1px solid rgba(30, 41, 59, 0.5);
-        border-radius: 6px 6px 0px 0px;
-        padding: 12px 28px;
-        color: #94a3b8;
-        backdrop-filter: blur(4px);
+        background-color: rgba(11, 15, 25, 0.85) !important;
+        border: 1px solid rgba(30, 41, 59, 0.5) !important;
+        border-radius: 6px 6px 0px 0px !important;
+        padding: 12px 28px !important;
+        color: #94a3b8 !important;
     }
     
     .stTabs [aria-selected="true"] {
         background-color: #0f172a !important;
         border-color: #ffbc00 !important;
-        box-shadow: 0 -4px 12px rgba(255, 188, 0, 0.15);
+        box-shadow: 0 -4px 12px rgba(255, 188, 0, 0.15) !important;
     }
     
     .stTabs [aria-selected="true"] p {
         color: #ffbc00 !important;
     }
 
-    /* קונטיינר מרכזי נקי לרדארים */
+    /* מרכוז כותרות פנימיות וטקסטים בכרטיסייה 3 */
+    .center-header-block {
+        text-align: center !important;
+        margin: 20px auto 10px auto;
+        width: 100%;
+        direction: rtl !important;
+    }
+    .center-header-block h2, .center-header-block h3 {
+        color: #ffffff !important;
+        text-align: center !important;
+        font-weight: 800 !important;
+    }
+    .center-header-block p {
+        color: #94a3b8 !important;
+        text-align: center !important;
+        font-size: 1.1rem;
+        margin-bottom: 25px;
+    }
+
+    /* קונטיינר מרכזי מבודד לרדארים */
     .cyber-box {
         direction: rtl !important;
         text-align: center !important;
@@ -115,7 +133,6 @@ st.markdown("""
     .cyber-box h3 {
         color: #ffffff !important;
         font-size: 1.7rem;
-        margin-bottom: 12px;
         text-align: center !important;
     }
     
@@ -123,62 +140,58 @@ st.markdown("""
         color: #cbd5e1 !important;
         font-size: 1.1rem;
         margin-bottom: 30px;
-        line-height: 1.6;
         text-align: center !important;
     }
 
-    /* עיצוב גורף ויציב לכפתורים - צבע קבוע ויציב ללא רקע לבן */
-    div.stButton {
-        text-align: center !important;
-        display: flex;
-        justify-content: center;
-        margin-top: 15px !important;
-        margin-bottom: 10px !important;
-    }
-    
-    div.stButton > button {
+    /* כפייה אבסולוטית של עיצוב כפתורים מקצועי בכל האתר - ביטול מוחלט של הריבוע הלבן */
+    div.stButton > button, div.stButton > button:focus, div.stButton > button:active {
+        background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
         color: #ffffff !important;
         font-weight: 700 !important;
         font-size: 1.05rem !important;
-        padding: 12px 45px !important;
+        padding: 12px 40px !important;
         border-radius: 30px !important;
-        border: none !important;
+        border: 1px solid #3b82f6 !important;
         width: auto !important;
-        min-width: 240px !important;
-        transition: all 0.25s ease !important;
-        cursor: pointer;
+        min-width: 220px !important;
+        margin: 15px auto 0 auto !important;
+        display: block !important;
+        box-shadow: 0 4px 15px rgba(29, 78, 216, 0.4) !important;
+        text-shadow: none !important;
     }
     
-    /* סגנונות צבע לכפתורים */
+    div.stButton > button:hover {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+        border-color: #60a5fa !important;
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6) !important;
+        transform: translateY(-2px) !important;
+        color: #ffffff !important;
+    }
+    
+    /* התאמת צבע ספציפית לכפתור שורט */
     .short-btn-style div.stButton > button {
         background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
+        border: 1px solid #ef4444 !important;
         box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4) !important;
     }
     .short-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
-        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.6) !important;
     }
 
+    /* התאמת צבע ספציפית לכפתור לונג */
     .long-btn-style div.stButton > button {
         background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+        border: 1px solid #10b981 !important;
         box-shadow: 0 4px 15px rgba(5, 150, 105, 0.4) !important;
     }
     .long-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #10b981 0%, #065f46 100%) !important;
-        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(5, 150, 105, 0.6) !important;
     }
 
-    .action-btn-style div.stButton > button {
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
-        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4) !important;
-    }
-    .action-btn-style div.stButton > button:hover {
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
-        transform: translateY(-2px);
-    }
-
-    /* תיקון קשיח לצבע הפונט בתוך התיבות הלבנות (Inputs) - שחור קבוע תמיד */
-    div[data-testid="stTextInput"] input, div[data-testid="stTextInput"] input:focus {
+    /* עיצוב תיבות ההקלדה הלבנות (Inputs) */
+    div[data-testid="stTextInput"] input {
         color: #000000 !important;           
         -webkit-text-fill-color: #000000 !important; 
         font-weight: 700 !important;          
@@ -194,9 +207,8 @@ st.markdown("""
     /* הגדלה והדגשה של הטקסט מעל קוביות החיפוש */
     div[data-testid="stTextInput"] label p {
         color: #ffffff !important;
-        font-weight: 900 !important;
-        font-size: 1.3rem !important; 
-        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        font-weight: 700 !important;
+        font-size: 1.25rem !important; 
     }
     
     div[data-testid="stTextInput"] label {
@@ -205,19 +217,18 @@ st.markdown("""
         margin-bottom: 5px !important;
     }
 
-    /* עיצוב אזורי החיפוש הנקיים ללא מלבנים מיותרים */
+    /* עיצוב המכולות של אזורי החיפוש */
     .search-section {
-        background: rgba(11, 17, 30, 0.85);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        border-radius: 16px;
-        padding: 35px;
-        margin-top: 15px;
+        background: rgba(11, 17, 30, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.07) !important;
+        border-radius: 16px !important;
+        padding: 35px !important;
+        margin-top: 15px !important;
         backdrop-filter: blur(10px);
         box-shadow: 0 15px 30px rgba(0,0,0,0.5);
-        direction: rtl !important;
     }
 
-    /* תיבת תוצאות יפה שנוצרת רק כשיש תוכן */
+    /* תיבת תוצאות */
     .result-box {
         background-color: #0f172a; 
         padding: 25px; 
@@ -225,8 +236,6 @@ st.markdown("""
         border: 1px solid #1e293b; 
         margin-top: 25px;
         box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
-        text-align: right !important;
-        direction: rtl !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -367,18 +376,21 @@ with tab2:
     if run_long:
         st.info("רדאר הלונג בבנייה קלה, בקרוב יוצגו כאן נתוני הקניות והדוחות המושלמים!")
 
-# ==================== כרטיסיית מניה בודדת ו-AI ====================
+# ==================== כרטיסיית מניה בודדת ו-AI (סידור מוחלט) ====================
 with tab3:
-    st.markdown('<div style="max-width:1100px; margin:20px auto 10px auto;"><h3>ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
+    # הזזת ומרכוז הטקסט הראשי + הוספת תיאור קצר לעמוד (שינוי 2)
+    st.markdown('<div class="center-header-block">'
+                '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
+                '<p>בעמוד זה תוכלו לקבל ניתוח טכני מהיר ומיידי של מדדי מפתח עבור כל מניה בשוק, או להתייעץ ולקבל תשובות מקצועיות וממוקדות מאנליסט ה-AI הבכיר של המערכת.</p>'
+                '</div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
         search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
-        st.markdown('<div class="action-btn-style">', unsafe_allow_html=True)
         run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
         analysis_container = st.container()
         if run_analysis:
@@ -401,9 +413,8 @@ with tab3:
     with col2:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
         user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
-        st.markdown('<div class="action-btn-style">', unsafe_allow_html=True)
         run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
         ai_container = st.container()
         if run_ai:
