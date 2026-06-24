@@ -103,7 +103,7 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* עיצוב הטאבים - יישור טקסט ימינה ואייקונים משמאל */
+    /* תיקון סופי לקריאת טאבים: כיתוב מימין והאייקון מוזז שמאלה */
     .stTabs [data-baseweb="tab-list"] {
         gap: 12px;
         justify-content: center !important;
@@ -115,9 +115,10 @@ st.markdown("""
         font-size: 1.3rem !important; 
         font-weight: 800 !important;  
         color: #94a3b8 !important;
-        display: flex;
-        flex-direction: row-reverse; /* הופך את סדר האייקון והטקסט */
-        gap: 8px;
+        display: flex !important;
+        flex-direction: row !important; /* סדר רגיל של קריאה מימין לשמאל */
+        align-items: center !important;
+        gap: 8px !important;
     }
     
     .stTabs [aria-selected="true"] p {
@@ -258,7 +259,7 @@ if "short_list" not in st.session_state: st.session_state.short_list = []
 if "long_list" not in st.session_state: st.session_state.long_list = []
 if "has_scanned" not in st.session_state: st.session_state.has_scanned = False
 
-# הגדרת הטאבים עם האייקונים משמאל והטקסט מימין באמצעות הפריסה החדשה
+# הגדרת הטאבים - הסמיילים ממוקמים כעת משמאל למילים
 tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח מניה בודדת & AI 🔍"])
 
 # ==================== כרטיסיית רדאר שורט סווינג ====================
@@ -367,7 +368,7 @@ with tab3:
                 st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
 
 # ====================================================================
-#  כפתור החיפוש המרכזי שחזר למטה ומנגנון שימור הנתונים החסין לחלוטין
+#  כפתור החיפוש המרכזי למטה ומנגנון מניעת הבהובים מוחלטת
 # ====================================================================
 st.markdown('<div style="margin-top: 40px;">', unsafe_allow_html=True)
 run_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום", key="btn_global_radar")
@@ -425,11 +426,14 @@ if run_radar:
             continue
         progress_bar.progress(int((i + 1) / len(tickers) * 100))
         
-    # שמירה לתוך ה-Session State כדי שהנתונים לא ייעלמו לאחר ריענון
+    # ניקוי מוחלט של אלמנטי הסטטוס מהמסך לפני הצגת הטבלאות
+    progress_bar.empty()
+    status_text.empty()
+    
+    # שמירה ועדכון לתוך ה-Session State
     st.session_state.short_list = temp_short
     st.session_state.long_list = temp_long
     st.session_state.has_scanned = True
     
-    progress_bar.empty()
-    status_text.empty()
-    st.rerun()  # הפעלה מחדש כדי להציג את הטבלאות בתוך הטאבים מיד
+    # ריענון בטוח של העמוד להזרקת הנתונים לתוך הטאבים בצורה חלקה
+    st.rerun()
