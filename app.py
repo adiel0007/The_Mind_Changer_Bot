@@ -18,16 +18,16 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # ==========================================
-#     מערכת עיצוב פרימיום - בורסה וגרפים ברקע
+#     מערכת עיצוב פרימיום מתוקנת ומהודקת (RTL)
 # ==========================================
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
 
-    /* תמונת רקע של בורסה וגרפים עם אפקט טשטוש ויוקרה */
+    /* תמונת רקע של בורסה וגרפים */
     .stApp {
         background-image: 
-            linear-gradient(rgba(6, 9, 19, 0.88), rgba(6, 9, 19, 0.93)),
+            linear-gradient(rgba(6, 9, 19, 0.90), rgba(6, 9, 19, 0.94)),
             url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop');
         background-size: cover;
         background-position: center;
@@ -52,10 +52,10 @@ st.markdown("""
         text-align: center !important;
         margin-top: 25px;
         margin-bottom: 10px;
-        text-shadow: 0 0 20px rgba(0, 242, 254, 0.3), 0 0 40px rgba(255, 255, 255, 0.2);
+        text-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
     }
     
-    /* תת כותרת ממורכזת ומיושרת היטב */
+    /* תת כותרת ממורכזת */
     .sub-title {
         font-size: 1.15rem;
         color: #cbd5e1;
@@ -64,10 +64,9 @@ st.markdown("""
         margin: 0 auto 40px auto;
         line-height: 1.7;
         direction: rtl !important;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
     
-    /* עיצוב כרטיסיות (Tabs) */
+    /* עיצוב והגדלת כרטיסיות (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 12px;
         justify-content: center !important;
@@ -78,10 +77,10 @@ st.markdown("""
         background-color: rgba(11, 15, 25, 0.85);
         border: 1px solid rgba(30, 41, 59, 0.5);
         border-radius: 6px 6px 0px 0px;
-        padding: 10px 24px;
+        padding: 12px 28px;
         color: #94a3b8;
-        font-weight: 600;
-        font-size: 1rem;
+        font-weight: 700;
+        font-size: 1.2rem !important; /* הגדלת פונט השם של הכרטיסיות */
         backdrop-filter: blur(4px);
     }
     .stTabs [aria-selected="true"] {
@@ -91,7 +90,7 @@ st.markdown("""
         box-shadow: 0 -4px 12px rgba(255, 188, 0, 0.15);
     }
 
-    /* קונטיינרים זכוכיתיים (Glassmorphism) יוקרתיים מיושרים וממורכזים */
+    /* קונטיינר מרכזי נקי ללא מלבנים כפולים מיותרים */
     .cyber-box {
         direction: rtl !important;
         text-align: center !important;
@@ -113,8 +112,8 @@ st.markdown("""
     }
     
     .cyber-box p {
-        color: #94a3b8 !important;
-        font-size: 1.05rem;
+        color: #cbd5e1 !important;
+        font-size: 1.1rem;
         margin-bottom: 30px;
         line-height: 1.6;
         text-align: center !important;
@@ -131,7 +130,7 @@ st.markdown("""
     div.stButton > button {
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1rem !important;
+        font-size: 1.05rem !important;
         padding: 12px 40px !important;
         border-radius: 30px !important;
         border: none !important;
@@ -141,14 +140,13 @@ st.markdown("""
         cursor: pointer;
     }
     
-    /* צבעים ייעודיים לכפתורים */
+    /* צבעי כפתורים */
     .short-btn-style div.stButton > button {
         background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
         box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4) !important;
     }
     .short-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
-        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.6) !important;
         transform: translateY(-2px);
     }
 
@@ -158,7 +156,6 @@ st.markdown("""
     }
     .long-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #10b981 0%, #065f46 100%) !important;
-        box-shadow: 0 6px 20px rgba(5, 150, 105, 0.6) !important;
         transform: translateY(-2px);
     }
 
@@ -168,11 +165,10 @@ st.markdown("""
     }
     .action-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
-        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
         transform: translateY(-2px);
     }
 
-    /* סידור שדות קלט (Inputs) */
+    /* תיקון צבע הפונט בתוך תיבות הקלט הלבנות - פונט שחור, גדול וברור */
     div[data-testid="stTextInput"] {
         direction: rtl !important;
         text-align: right !important;
@@ -181,21 +177,25 @@ st.markdown("""
     div[data-testid="stTextInput"] input {
         text-align: right !important;
         direction: rtl !important;
-        background-color: rgba(15, 23, 42, 0.9) !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        background-color: #ffffff !important; /* שמירה על תיבה לבנה */
+        color: #000000 !important;           /* פונט שחור לחלוטין */
+        font-weight: 700 !important;          /* מודגש */
+        font-size: 1.1rem !important;         /* מוגדל */
+        border: 2px solid #cbd5e1 !important;
         border-radius: 8px !important;
-        padding: 10px !important;
+        padding: 12px !important;
     }
     
     div[data-testid="stTextInput"] label {
         text-align: right !important;
         width: 100% !important;
-        color: #cbd5e1 !important;
-        font-weight: 600 !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 1.05rem !important;
+        margin-bottom: 8px !important;
     }
 
-    /* עיצוב אזור ה-AI והחיפוש בטורים */
+    /* עיצוב אזורי החיפוש */
     .search-section {
         background: rgba(11, 17, 30, 0.85);
         border: 1px solid rgba(255, 255, 255, 0.07);
@@ -241,8 +241,8 @@ def ask_gemini(question):
 # --- כותרת ראשית ---
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
-# --- ברכת ברוכים הבאים בעמוד הראשי ---
-st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. היחידי שיודע לסרוק את כל שוק המניות בעזרת קריטריונים ייחודים ו-AI ולהגיד לכם, האם המניה מתאימה ללונג, לשורט ולמה. בהצלחה</div>', unsafe_allow_html=True)
+# --- ברכת ברוכים הבאים בעמוד הראשי עם סמיילי מעודכן ---
+st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. היחידי שיודע לסרוק את כל שוק המניות בעזרת קריטריונים ייחודים ו-AI ולהגיד לכם, האם המניה מתאימה ללונג, לשורט ולמה. בהצלחה 📈🔥</div>', unsafe_allow_html=True)
 
 # חלוקה לכרטיסיות (Tabs)
 tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדאר לונג", "🔍 ניתוח מניה בודדת & AI"])
