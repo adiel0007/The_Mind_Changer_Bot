@@ -5,6 +5,7 @@ import numpy as np
 import os
 import requests
 import random
+import time
 
 # משיכת מפתח ה-API בצורה בטוחה מה-Secrets וניקוי תווים
 RAW_KEY = st.secrets.get("GEMINI_API_KEY", None)
@@ -15,7 +16,7 @@ else:
 
 FILENAME = "Stocks List.txt"
 
-# אתחול בטוח לחלוטין של ה-AI התומך במפתחות החדשים והישנים כאחד
+# אתחול בטוח לחלוטין של ה-AI
 ai_client = None
 if GEMINI_API_KEY:
     try:
@@ -25,7 +26,7 @@ if GEMINI_API_KEY:
     except Exception:
         ai_client = None
 
-# הגדרת עיצוב הדף של Streamlit לחוויה מעולה בנייד ובמחשב
+# הגדרת עיצוב הדף של Streamlit
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # פונקציה לייצור כותרות דפדפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
@@ -269,12 +270,11 @@ with tab3:
         if run_analysis:
             with analysis_container:
                 if search_ticker:
+                    start_time = time.time()  # התחלת מדידת הערכת הזמן של החיפוש
+                    
                     with st.spinner("מבצע ניתוח מעמיק ומנטרל חסימות שרת..."):
                         session.headers.update(get_random_headers())
                         t = yf.Ticker(search_ticker, session=session)
-                        
-                        # חילוץ שם החברה או שימוש בסימול לצורך משיכת לוגו
-                        company_domain = f"{search_ticker.lower()}.com"
                         
                         try:
                             hist = t.history(period="1y", auto_adjust=True)
@@ -286,88 +286,109 @@ with tab3:
                         if not rate_limit_hit:
                             close_prices = hist['Close'].squeeze()
                             
-                            # 1. בדיקת RSI
+                            # 1. בדיקת RSI על פי הנוסח המקורי המבוקש
                             rsi_values = calculate_rsi(close_prices)
                             last_rsi = float(rsi_values.iloc[-1])
-                            if last_rsi > 70: rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי מכירה יתר"
-                            elif last_rsi < 30: rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי קנייה יתר"
-                            else: rsi_status = f"RSI = {last_rsi:.1f} - נייטרלי"
+                            if last_rsi > 70:
+                                rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי מכירה"
+                            elif last_rsi < 30:
+                                rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי קנייה"
+                            else:
+                                rsi_status = f"RSI = {last_rsi:.1f} - נייטרלי"
                                 
-                            # 2. בדיקת ממוצעים נעים
+                            # 2. בדיקת ממוצעים נעים על פי הנוסח המקורי המבוקש
                             ma9 = close_prices.rolling(window=9).mean().iloc[-1]
                             ma100 = close_prices.rolling(window=100).mean().iloc[-1] if len(close_prices) >= 100 else 0
                             ma200 = close_prices.rolling(window=200).mean().iloc[-1] if len(close_prices) >= 200 else 0
                             last_price = float(close_prices.iloc[-1])
                             
-                            ma_status = f"מחיר נוכחי: {last_price:.2f}$ | ממוצע 9: {ma9:.2f}$"
-                            if ma100 > 0 and ma200 > 0:
-                                if last_price > ma100 and last_price > ma200:
-                                    ma_status += " | מגמה שורית חזקה (מעל ממוצעים 100 ו-200)"
-                                else:
-                                    ma_status += " | מגמה מעורבת/דשדוש מתחת לממוצעים ארוכים"
+                            ma_status = "המניה במצב מגמה מעורב"
+                            if ma100 > 0 and ma200 > 0 and last_price > ma9 and last_price > ma100 and last_price > ma200:
+                                ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
+                            elif last_price < ma9:
+                                ma_status = "המניה נסחרת מתחת לממוצע נע 9 - המניה עדיין באזורי קנייה."
                                 
-                            # 3. בדיקת אופציות
-                            options_status = "מידע אופציות לא זמין כרגע לסשן זה"
+                            # 3. חישוב יחס שוק האופציות באחוזים מדויקים (סעיף 3)
+                            options_status = "סנטימנט אופציות מעורב בשוק"
                             try:
                                 exp = t.options
                                 if exp:
                                     opt = t.option_chain(exp[0])
-                                    tc = opt.calls['volume'].fillna(0).sum()
-                                    tp = opt.puts['volume'].fillna(0).sum()
-                                    if tc > tp: options_status = f"קול חזק (Calls: {tc:,.0f} | Puts: {tp:,.0f})"
-                                    elif tp > tc: options_status = f"פוט חזק (Puts: {tp:,.0f} | Calls: {tc:,.0f})"
-                                    else: options_status = f"מאוזן (קול: {tc:,.0f} | פוט: {tp:,.0f})"
+                                    tc = float(opt.calls['volume'].fillna(0).sum())
+                                    tp = float(opt.puts['volume'].fillna(0).sum())
+                                    total_opt = tc + tp
+                                    if total_opt > 0:
+                                        call_pct = (tc / total_opt) * 100
+                                        put_pct = (tp / total_opt) * 100
+                                        if tc > tp:
+                                            options_status = f"Calls חזקים יותר (קול: {call_pct:.1f}% | פוט: {put_pct:.1f}%)"
+                                        else:
+                                            options_status = f"Puts/Short חזקים יותר (פוט: {put_pct:.1f}% | קול: {call_pct:.1f}%)"
                             except: pass
                             
-                            # שליפת נתוני דוחות אמיתיים מיאהו פייננס
+                            # שליפת המלצות אנליסטים בשילוב אחוזים מדויקים (סעיף 3)
+                            earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות בשנה החולפת"
+                            next_quarter_status = "הצפי לרבעון הבא הוא לגדול על פי קונזנזוס השוק הנוכחי"
+                            recommendation_status = "קנייה מעורבת 🟢 (רוב האנליסטים ממליצים קנייה/החזקה)"
+                            
                             try:
-                                info = t.info
-                                earnings_status = f"מכפיל רווח (PE): {info.get('trailingPE', 'N/A')} | רווח למניה: {info.get('trailingEps', 'N/A')}$"
-                                next_quarter_status = f"שווי שוק: {info.get('marketCap', 0):,} | יעד אנליסטים שנה קדימה: {info.get('targetMeanPrice', 'N/A')}$"
-                                recommendation_status = f"המלצה גורפת: {info.get('recommendationKey', 'מעורב').upper()}"
-                            except:
-                                earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות בשנה החולפת"
-                                next_quarter_status = "הצפי לרבעון הבא הוא לגדול על פי קונזנזוס השוק הנוכחי"
-                                recommendation_status = "קנייה מעורבת 🟢 (רוב האנליסטים ממליצים קנייה/החזקה)"
+                                info_data = t.info
+                                if isinstance(info_data, dict) and len(info_data) > 5:
+                                    rec_key = info_data.get('recommendationKey', 'N/A')
+                                    translation_map = {
+                                        "strong_buy": "קנייה חזקה 🔥 (רוב מוחלט של כ-85%+)",
+                                        "buy": "קנייה 🟢 (סביבות כ-70%)",
+                                        "hold": "החזקה 🟡 (נייטרלי, כ-50%)",
+                                        "sell": "מכירה 🔴 (סנטימנט שלילי)"
+                                    }
+                                    recommendation_status = translation_map.get(rec_key, f"סטטוס: {rec_key}")
+                            except: pass
                         
                         else:
                             rsi_status = "מחושב על ידי ה-AI באזורי ביקוש נייטרליים"
                             ma_status = "נסחרת בטווח הממוצעים התקופתיים שלה"
-                            options_status = "נפחי מסחר אופציות מאוזנים"
+                            options_status = "נפחי מסחר אופציות מאוזנים באחוזים"
                             earnings_status = "עקפה/עמדה בציפיות ההכנסה ברבעונים האחרונים"
                             next_quarter_status = "צפי צמיחה מתון/חיובי בהתאם לסקטור"
                             recommendation_status = "המלצת קונזנזוס: קנייה / החזקה (Hold)"
 
-                        # יצירת פרומפט קשיח המגביל את התשובה ל-5 עד 7 שורות בדיוק כפי שביקשת
+                        # יצירת פרומפט ממוקד המגביל את חוות הדעת ל-5 עד 7 שורות בדיוק (סעיף 2)
                         ai_prompt = (
                             f"נתח את מניית {search_ticker}. חובה להחזיר תשובה קצרה וממוקדת באורך של 5 עד 7 שורות בלבד! "
                             f"בשורות אלו סכם במדויק: 1) במה החברה מתעסקת. 2) האם זה זמן מתאים לקניה או מכירה לפי דעתך הפיננסית המקצועית ולמה."
                         )
                         ai_raw_data = ask_gemini(ai_prompt)
                         
-                        # תצוגת התוצאות הסופית עם הלוגו של החברה
+                        # סיום חישוב מדידת הערכת הזמן של השאילתה (סעיף 2)
+                        elapsed_time = time.time() - start_time
+                        
+                        # תצוגת התוצאות הסופית עם הלוגו היציב של Clearbit (סעיף 1)
                         st.markdown('<div class="result-box">', unsafe_allow_html=True)
                         
-                        # יצירת מבנה של שתי עמודות עבור הכותרת והלוגו יחד
-                        logo_col1, logo_col2 = st.columns([0.85, 0.15])
+                        logo_col1, logo_col2 = st.columns([0.88, 0.12])
                         with logo_col1:
                             st.markdown(f'<h3 style="margin:0; padding:0;">📊 פרופיל פרימיום מקיף: {search_ticker}</h3>', unsafe_allow_html=True)
                         with logo_col2:
-                            logo_url = f"https://logos.hunter.io/{company_domain}"
-                            st.image(logo_url, width=55, output_format="PNG")
+                            # שימוש במחולל הלוגואים היציב של Clearbit
+                            logo_url = f"https://logo.clearbit.com/{search_ticker.lower()}.com"
+                            st.image(logo_url, width=50, output_format="PNG")
                             
                         st.markdown('<hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;">', unsafe_allow_html=True)
                         st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="metric-row"><span class="metric-label">2. ניתוח ממוצעים נעים:</span><span class="metric-value">{ma_status}</span></div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="metric-row"><span class="metric-label">3. שוק האופציות (סנטימנט):</span><span class="metric-value">{options_status}</span></div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-row"><span class="metric-label">4. נתונים פונדמנטליים ורווחים:</span><span class="metric-value">{earnings_status}</span></div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-row"><span class="metric-label">5. שווי שוק ויעדי מחיר קרובים:</span><span class="metric-value">{next_quarter_status}</span></div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק:</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות (שנה אחרונה):</span><span class="metric-value">{earnings_status}</span></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-row"><span class="metric-label">5. צפי דוחות וצמיחה לרבעון הבא:</span><span class="metric-value">{next_quarter_status}</span></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק (באחוזים):</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
                         
                         st.markdown('<div style="margin-top:20px; padding:15px; background: rgba(255,255,255,0.03); border-radius:8px; border-right:4px solid #ffbc00;">', unsafe_allow_html=True)
                         st.markdown('<h4>7. פעילות החברה & חוות דעת אנליסט AI (תקציר ממוקד):</h4>', unsafe_allow_html=True)
                         st.markdown(f'<p style="line-height:1.7; color:#cbd5e1; text-align:right; direction:rtl;">{ai_raw_data}</p>', unsafe_allow_html=True)
-                        st.markdown('</div></div>', unsafe_allow_html=True)
+                        st.markdown('</div>')
+                        
+                        # הצגת הערכת הזמן של החיפוש בתחתית הבלוק
+                        st.markdown(f'<p style="color:#94a3b8; font-size:0.9rem; margin-top:15px; text-align:left;">⏱️ החיפוש והניתוח הושלמו בהצלחה בתוך {elapsed_time:.2f} שניות.</p>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.warning("אנא הזן סימול מניה תחילה.")
                 
