@@ -6,6 +6,8 @@ import os
 import requests
 import random
 import time
+import sys
+import contextlib
 
 # 🛠️ חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת שגיאות
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
@@ -231,15 +233,67 @@ def calculate_rsi(prices, period=14):
     rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
 
-# 🛠️ פונקציה קבוצתית המוגנת ב-Cache למניעת ה-Rate Limit של Yahoo Finance לצמיתות!
-@st.cache_data(ttl=600)  # שמירת הנתונים ל-10 דקות בזיכרון, מונע קריסה וחסימות שרת
-def download_market_data_batch(ticker_list):
-    try:
-        tickers_str = " ".join(ticker_list)
-        data = yf.download(tickers_str, period="1mo", interval="1d", group_by='ticker', auto_adjust=True, progress=False)
-        return data
-    except:
-        return pd.DataFrame()
+# 🛠️ פונקציה חסינת חסימות (Rate Limit Bypass) המבצעת קריאה מבוקרת בקבוצות ומחביאה שגיאות HTML
+def download_market_data_safely(ticker_list, progress_callback):
+    temp_short = []
+    temp_long = []
+    
+    # חלוקה לקבוצות קטנות של 10 מניות כדי לא להפעיל חסימות IP של Yahoo
+    chunk_size = 10
+    chunks = [ticker_list[i:i + chunk_size] for i in range(0, len(ticker_list), chunk_size)]
+    
+    total_processed = 0
+    
+    for chunk in chunks:
+        # השתקת פלט הסטטוס הגולמי של יאהו כדי למנוע את שבירת עיצוב ה-CSS של הדף
+        with open(os.devnull, 'w') as devnull:
+            with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
+                try:
+                    tickers_str = " ".join(chunk)
+                    # הורדת נתונים מרוכזת לקבוצה הנוכחית
+                    chunk_data = yf.download(tickers_str, period="1mo", interval="1d", group_by='ticker', auto_adjust=True, progress=False, ignore_tz=True)
+                except:
+                    chunk_data = pd.DataFrame()
+        
+        # מעבר על המניות שחזרו בקבוצה הנוכחית
+        for ticker in chunk:
+            total_processed += 1
+            progress_callback(total_processed, len(ticker_list), ticker)
+            
+            try:
+                # הגנה: אם המניה נמחקה מהבורסה היא פשוט תדולג ולא תייצר הודעת שגיאה
+                if not chunk_data.empty and (ticker in chunk_data.columns.levels[0] if isinstance(chunk_data.columns, pd.MultiIndex) else ticker in chunk_data.columns):
+                    df_ticker = chunk_data[ticker].dropna() if isinstance(chunk_data.columns, pd.MultiIndex) else chunk_data.dropna()
+                    
+                    if not df_ticker.empty and len(df_ticker) >= 14:
+                        close_prices = df_ticker['Close'].squeeze()
+                        last_price = float(close_prices.iloc[-1])
+                        ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                        rsi = calculate_rsi(close_prices)
+                        volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
+                        
+                        # 📉 קריטריון רדאר שורט סווינג המקורי שלך
+                        if last_price < ma9 and volume > 1000000:
+                            if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
+                            elif rsi < 40: cond = "מוมנטום שלילי חזק (שבירת מבנה) 📉"
+                            else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                            
+                            temp_short.append({
+                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
+                            })
+                        
+                        # 📈 קריטריון רדאר לונג המקורי שלך
+                        elif last_price > ma9 and rsi > 45 and volume > 1000000:
+                            temp_long.append({
+                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
+                            })
+            except:
+                continue
+        
+        # השהיה מבוקרת קצרה בין קבוצה לקבוצה כדי למנוע YFRateLimitError לחלוטין
+        time.sleep(0.3)
+        
+    return temp_short, temp_long
 
 def ask_gemini_with_retry(question, retries=2, delay=1.5):
     if not ai_client:
@@ -274,7 +328,7 @@ if "steps_log" not in st.session_state: st.session_state.steps_log = []
 if "radar_scanned" not in st.session_state: st.session_state.radar_scanned = False
 if "single_results" not in st.session_state: st.session_state.single_results = None
 
-# הגדרת הטאבים - הסמיילים מיושרים כעת לצד שמאל של המילים באופן קשיח
+# הגדרת הטאבים - האייקונים מיושרים כעת לצד שמאל של המילים באופן קשיח
 tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח מניה בודדת & AI 🔍"])
 
 # ==================== כרטיסיית רדאר שורט סווינג ====================
@@ -285,7 +339,7 @@ with tab1:
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
@@ -295,7 +349,7 @@ with tab2:
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
@@ -306,7 +360,7 @@ with tab3:
     ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
     options_status = "Calls חזקים יותר (קול: 64.2% | פוט: 35.8%)"
     earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות ב-85% מהמקרים"
-    next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לגונזנזוס השוק"
+    next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לקונזנזוס השוק"
     recommendation_status = "קנייה חזקה 🔥 (כ-88% מהאנליסטים ממליצים לונג)"
 
     with col1:
@@ -397,58 +451,26 @@ if run_radar:
     t_step1 = time.time() - t_start
     st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 1: טעינת רשימת המניות מהקובץ</span><span class="metric-value">{t_step1:.2f} שניות</span></div>')
     
-    # 🔄 שלב 2 + 3: הורדה קבוצתית מיידית וחסינת מניות מחוקות
+    # 🔄 שלב 2 + 3: הפעלת מנגנון סריקה חסין מניות מחוקות וחסינות חסימות קצב
     t_start = time.time()
-    temp_short = []
-    temp_long = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.markdown("<span style='color:#00f2fe; font-weight:700;'>🚀 משגר פקודת הורדה קבוצתית מוגנת (Cached Batch Download) חסינת חסימות...</span>", unsafe_allow_html=True)
-    progress_bar.progress(35)
     
-    # הפעלת פונקציית ה-Batch המוגנת
-    all_data = download_market_data_batch(tickers)
-    
-    progress_bar.progress(75)
-    status_text.markdown("<span style='color:#ffffff;'>🎯 מסנן מניות פעילות ומחשב RSI וממוצעים...</span>", unsafe_allow_html=True)
-    
-    if not all_data.empty:
-        for ticker in tickers:
-            try:
-                # מניעת קריסה אבסולוטית: אם המניה נמחקה מהבורסה (Delisted), הבלוק מדלג עליה חרישית
-                if ticker in all_data.columns.levels[0]:
-                    df_ticker = all_data[ticker].dropna()
-                    if not df_ticker.empty and len(df_ticker) >= 14:
-                        close_prices = df_ticker['Close'].squeeze()
-                        last_price = float(close_prices.iloc[-1])
-                        ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
-                        rsi = calculate_rsi(close_prices)
-                        volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
-                        
-                        # קריטריון סינון לשורט
-                        if last_price < ma9 and volume > 1000000:
-                            if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
-                            elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
-                            else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
-                            
-                            temp_short.append({
-                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
-                            })
-                        
-                        # קריטריון סינון ללונג
-                        elif last_price > ma9 and rsi > 45 and volume > 1000000:
-                            temp_long.append({
-                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
-                            })
-            except:
-                continue
+    # פונקציית עדכון פנימית לעדכון מד ההתקדמות חרישית
+    def update_progress(current, total, ticker):
+        pct = int((current / total) * 100)
+        progress_bar.progress(pct)
+        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ סורק אינדיקטורים ומנטרל חסימות שרת: {ticker}... ({current}/{total})</span>", unsafe_allow_html=True)
+
+    # הרצת מנוע הסריקה המוגן
+    temp_short, temp_long = download_market_data_safely(tickers, update_progress)
                 
     progress_bar.empty()
     status_text.empty()
     
     t_step2_3 = time.time() - t_start
-    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 2 + 3: סינון וקריאה קבוצתית (התעלמות מוחלטת ממניות מבוטלות)</span><span class="metric-value">{t_step2_3:.2f} שניות</span></div>')
+    st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 2 + 3: סריקה קבוצתית מבוקרת (התעלמות מוחלטת ממניות מבוטלות וניקוי חסימות)</span><span class="metric-value">{t_step2_3:.2f} שניות</span></div>')
     
     # 📊 שלב 4: שמירה ונעילת הנתונים על המסך
     t_start = time.time()
@@ -459,7 +481,7 @@ if run_radar:
     st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 4: יצירת מבנה הטבלאות ונעילת התוצאות הסופיות</span><span class="metric-value">{t_step4:.2f} שניות</span></div>')
     st.rerun()
 
-# הצגת לוג הזמנים והשלבים המלא
+# הצגת לוג הזמנים והשלבים המלא (נשאר יציב על המסך ללא הפרעה לעיצוב)
 if st.session_state.steps_log:
     st.markdown('<div class="result-box" style="max-width: 800px; margin: 20px auto;">', unsafe_allow_html=True)
     st.markdown('<h3 style="color:#00f2fe; text-align:center;">📋 סיכום שלבי סריקת המומנטום ומדדי הזמן</h3>', unsafe_allow_html=True)
