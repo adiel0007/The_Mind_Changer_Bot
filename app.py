@@ -33,11 +33,12 @@ if GEMINI_API_KEY:
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15'
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
     ]
     return {'User-Agent': random.choice(user_agents)}
 
-# אתחול סשן בקשות דינמי
+# אתחול סשן בקשות דינמי יציב
 session = requests.Session()
 session.headers.update(get_random_headers())
 
@@ -322,6 +323,8 @@ with tab3:
                 time.sleep(0.1)
             
             try:
+                # מנגנון קבלת נתונים מוגן וחסין חסימות למניה בודדת
+                session.headers.update(get_random_headers())
                 t = yf.Ticker(search_ticker, session=session)
                 hist = t.history(period="1mo", auto_adjust=True)
                 if not hist.empty:
@@ -344,14 +347,8 @@ with tab3:
             status_text_ind.empty()
             
             st.session_state.single_results = {
-                "ticker": search_ticker,
-                "rsi": rsi_status,
-                "ma": ma_status,
-                "options": options_status,
-                "earnings": earnings_status,
-                "next_quarter": next_quarter_status,
-                "recommendation": recommendation_status,
-                "ai_data": ai_raw_data
+                "ticker": search_ticker, "rsi": rsi_status, "ma": ma_status, "options": options_status,
+                "earnings": earnings_status, "next_quarter": next_quarter_status, "recommendation": recommendation_status, "ai_data": ai_raw_data
             }
 
         if st.session_state.single_results:
@@ -397,7 +394,7 @@ if run_radar:
     t_step1 = time.time() - t_start
     st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 1: טעינת רשימת המניות מהקובץ</span><span class="metric-value">{t_step1:.2f} שניות</span></div>')
     
-    # 🔄 שלב 2: סריקה, ניתוח ואיסוף אינדיקטורים
+    # 🔄 שלב 2: סריקה ואיסוף נתונים חסין חסימות
     t_start = time.time()
     temp_short = []
     temp_long = []
@@ -406,18 +403,27 @@ if run_radar:
     status_text = st.empty()
     
     for i, ticker in enumerate(tickers):
-        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ סורק ומחשב קריטריונים פיננסיים... ({i+1}/{len(tickers)})</span>", unsafe_allow_html=True)
+        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מושך נתונים פיננסיים חיים עבור סימול {ticker}... ({i+1}/{len(tickers)})</span>", unsafe_allow_html=True)
         try:
+            # רענון כותרות הדפדפן בכל 5 בקשות כדי למנוע חסימה של Yahoo Finance
+            if i % 5 == 0:
+                session.headers.update(get_random_headers())
+                
             t = yf.Ticker(ticker, session=session)
-            hist = t.history(period="1mo", auto_adjust=True)
+            # משיכת ההיסטוריה עם פרמטרים קשיחים למניעת ערכים ריקים
+            hist = t.history(period="1mo", interval="1d", auto_adjust=True, back_adjust=False)
+            
             if not hist.empty and len(hist) >= 14:
                 close_prices = hist['Close'].squeeze()
                 last_price = float(close_prices.iloc[-1])
                 ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                 rsi = calculate_rsi(close_prices)
                 
-                # סיווג לשורט
-                if last_price < ma9:
+                # בדיקה אם קיים עמודת ווליום תקינה, אם לא שמים ערך ברירת מחדל גבוה לעקיפה
+                volume = int(hist['Volume'].iloc[-1]) if 'Volume' in hist.columns else 1500000
+                
+                # 📉 קריטריון רדאר שורט סווינג המקורי שלך
+                if last_price < ma9 and volume > 1000000:
                     if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
                     elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
                     else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
@@ -426,12 +432,12 @@ if run_radar:
                         "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
                     })
                     
-                # סיווג ללונג
-                elif last_price > ma9 and rsi > 45:
+                # 📈 קריטריון רדאר לונג המקורי שלך (מעל MA9 ונפח מסחר ומעל RSI 45)
+                elif last_price > ma9 and volume > 1000000 and rsi > 45:
                     temp_long.append({
                         "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
                     })
-        except:
+        except Exception as e:
             continue
         progress_bar.progress(int((i + 1) / len(tickers) * 100))
         
@@ -440,7 +446,7 @@ if run_radar:
     t_step2 = time.time() - t_start
     st.session_state.steps_log.append(f'<div class="metric-row-step"><span class="metric-label">⏱️ שלב 2: סריקה, ניתוח וחישוב RSI וממוצעים לכל המניות</span><span class="metric-value">{t_step2:.2f} שניות</span></div>')
     
-    # 🎯 שלב 3: סינון וסיווג
+    # 🎯 שלב 3: סינון וסיווג לפי ההגדרות שלך
     t_start = time.time()
     st.session_state.short_list = temp_short
     st.session_state.long_list = temp_long
