@@ -36,7 +36,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* כפיית כיוון RTL על כל האפליקציה בצורה גורף */
+    /* כפיית כיוון RTL על כל האפליקציה בצורה גורפת */
     .stApp, div[data-testid="stVerticalBlock"], div[data-testid="stHorizontalBlock"] {
         direction: rtl !important;
         text-align: right !important;
@@ -97,26 +97,7 @@ st.markdown("""
         color: #ffbc00 !important;
     }
 
-    /* מרכוז כותרות פנימיות וטקסטים בכרטיסייה 3 */
-    .center-header-block {
-        text-align: center !important;
-        margin: 20px auto 10px auto;
-        width: 100%;
-        direction: rtl !important;
-    }
-    .center-header-block h2, .center-header-block h3 {
-        color: #ffffff !important;
-        text-align: center !important;
-        font-weight: 800 !important;
-    }
-    .center-header-block p {
-        color: #94a3b8 !important;
-        text-align: center !important;
-        font-size: 1.1rem;
-        margin-bottom: 25px;
-    }
-
-    /* קונטיינר מרכזי מבודד לרדארים */
+    /* קונטיינר מרכזי נקי לרדארים */
     .cyber-box {
         direction: rtl !important;
         text-align: center !important;
@@ -143,7 +124,7 @@ st.markdown("""
         text-align: center !important;
     }
 
-    /* כפייה אבסולוטית של עיצוב כפתורים מקצועי בכל האתר */
+    /* עיצוב גורף ויציב לכפתורים */
     div.stButton > button, div.stButton > button:focus, div.stButton > button:active {
         background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
         color: #ffffff !important;
@@ -153,7 +134,7 @@ st.markdown("""
         border-radius: 30px !important;
         border: 1px solid #3b82f6 !important;
         width: auto !important;
-        min-width: 220px !important;
+        min-width: 240px !important;
         margin: 15px auto 0 auto !important;
         display: block !important;
         box-shadow: 0 4px 15px rgba(29, 78, 216, 0.4) !important;
@@ -164,10 +145,8 @@ st.markdown("""
         border-color: #60a5fa !important;
         box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6) !important;
         transform: translateY(-2px) !important;
-        color: #ffffff !important;
     }
     
-    /* התאמת צבע ספציפית לכפתור שורט */
     .short-btn-style div.stButton > button {
         background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
         border: 1px solid #ef4444 !important;
@@ -175,10 +154,8 @@ st.markdown("""
     }
     .short-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
-        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.6) !important;
     }
 
-    /* התאמת צבע ספציפית לכפתור לונג */
     .long-btn-style div.stButton > button {
         background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
         border: 1px solid #10b981 !important;
@@ -186,14 +163,30 @@ st.markdown("""
     }
     .long-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #10b981 0%, #065f46 100%) !important;
-        box-shadow: 0 6px 20px rgba(5, 150, 105, 0.6) !important;
     }
 
-    /* שינוי צבע הטקסט בתוך הודעות המידע (הקופסאות הכחולות) ללבן קריא */
+    /* שינוי צבע הטקסט בתוך הודעות המידע ללבן קריא */
     div[data-testid="stNotification"] p {
         color: #ffffff !important;
         font-weight: 600 !important;
         text-align: right !important;
+    }
+
+    /* עיצוב ותיקון מרווחי הטבלאות לצמצום חורים ענקיים וישור מושלם לימין */
+    div[data-testid="stDataFrame"] {
+        background-color: #ffffff !important;
+        border-radius: 12px !important;
+        overflow: hidden !important;
+        max-width: 650px !important; /* הגבלת הרוחב הכללי של הטבלה למראה ממוקד */
+        margin: 25px auto !important; /* מרכוז הטבלה בעמוד */
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important;
+    }
+    
+    /* הזרקת הגדרות ישירות לתאי המידע בטבלה */
+    div[data-testid="stDataFrame"] td, div[data-testid="stDataFrame"] th {
+        text-align: right !important;
+        font-weight: 600 !important;
+        padding: 10px 15px !important;
     }
 
     /* עיצוב תיבות ההקלדה הלבנות (Inputs) */
@@ -210,38 +203,10 @@ st.markdown("""
         text-align: right !important;
     }
     
-    /* הגדלה והדגשה של הטקסט מעל קוביות החיפוש */
     div[data-testid="stTextInput"] label p {
         color: #ffffff !important;
         font-weight: 700 !important;
         font-size: 1.25rem !important; 
-    }
-    
-    div[data-testid="stTextInput"] label {
-        text-align: right !important;
-        width: 100% !important;
-        margin-bottom: 5px !important;
-    }
-
-    /* עיצוב המכולות של אזורי החיפוש */
-    .search-section {
-        background: rgba(11, 17, 30, 0.85) !important;
-        border: 1px solid rgba(255, 255, 255, 0.07) !important;
-        border-radius: 16px !important;
-        padding: 35px !important;
-        margin-top: 15px !important;
-        backdrop-filter: blur(10px);
-        box-shadow: 0 15px 30px rgba(0,0,0,0.5);
-    }
-
-    /* תיבת תוצאות */
-    .result-box {
-        background-color: #0f172a; 
-        padding: 25px; 
-        border-radius: 12px; 
-        border: 1px solid #1e293b; 
-        margin-top: 25px;
-        box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -292,7 +257,6 @@ with tab1:
                 '<p>סורק מניות לשורט, המבוסס על נתונים ייחודים שיכולים להגדיר מניות לשורט</p>', unsafe_allow_html=True)
     
     st.markdown('<div class="short-btn-style">', unsafe_allow_html=True)
-    # שינוי מיקום האמוג'י לצד שמאל (סעיף 1)
     run_short = st.button("הפעל סריקת שורט 🚀", key="btn_short")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
@@ -312,6 +276,7 @@ with tab1:
                         if len(df) < 110: continue
                         
                         current_price = float(df['Close'].iloc[-1])
+                        # שינוי טווח מחירים מ-15 עד 450 כולל ספליטים (סעיף 1)
                         if not (15 <= current_price <= 450): continue
                         
                         df['RSI'] = calculate_rsi(df['Close'])
@@ -365,8 +330,10 @@ with tab1:
                 final_short = sorted(final_short, key=lambda x: x['put_pct'], reverse=True)[:10]
                 st.balloons()
                 df_display = pd.DataFrame(final_short)
-                df_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי", "אחוז אופציות PUT"]
-                st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}", "אחוז אופציות PUT": "{:.1f}%"}), use_container_width=True)
+                df_display = df_display[["ticker", "price", "rsi"]]
+                df_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי"]
+                # הצגת הטבלה המצומצמת והמסודרת
+                st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=False)
             else:
                 st.warning("אף מניה לא עברה את סינון האופציות (Put > Call).")
 
@@ -380,12 +347,11 @@ with tab2:
     run_long = st.button("הפעל סריקת לונג 🚀", key="btn_long")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
-    # הוספת מנגנון שלב אחר שלב ופס טעינה דינמי גם ללונג (סעיף 3)
     if run_long:
         tickers = get_all_tickers()
         st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
         progress_bar_long = st.progress(0)
-        final_long = []
+        stage1_passed_long = []
         
         with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים ללונג..."):
             try:
@@ -397,23 +363,48 @@ with tab2:
                         if len(df) < 50: continue
                         
                         current_price = float(df['Close'].iloc[-1])
+                        # שינוי 1: טווח מחיר 15-450 כולל ספליטים
+                        if not (15 <= current_price <= 450): continue
+                        
                         df['RSI'] = calculate_rsi(df['Close'])
                         last_rsi = float(df['RSI'].iloc[-1])
                         
-                        # סינון פשוט ללונג לצורך הפעלת הפס באופן מלא
-                        if last_rsi < 40: 
-                            final_long.append({"ticker": ticker, "price": current_price, "rsi": last_rsi})
+                        # שינוי 2: מדד RSI חייב להיות מתחת ל-70 בנר יום האחרון
+                        if np.isnan(last_rsi) or last_rsi >= 70: continue
+                        
+                        stage1_passed_long.append({"ticker": ticker, "price": current_price, "rsi": last_rsi})
                     except: continue
                     progress_bar_long.progress((idx + 1) / len(tickers))
             except Exception as e:
                 st.error(f"שגיאה בהורדת הנתונים: {e}")
                 
+        if not stage1_passed_long:
+            st.warning("0 מניות עברו את הסינון הטכני הראשוני של לונג.")
+        else:
+            st.success(f"מצאתי {len(stage1_passed_long)} מניות. בודק יחס אופציות (קולים > פוטים)...")
+            final_long = []
+            
+            for s in stage1_passed_long:
+                try:
+                    t = yf.Ticker(s['ticker'])
+                    exp = t.options
+                    if exp:
+                        opt = t.option_chain(exp[0])
+                        tc = opt.calls['volume'].fillna(0).sum()
+                        tp = opt.puts['volume'].fillna(0).sum()
+                        
+                        # שינוי 3: יחס האופציות על המניה - קולים (Calls) חייב להיות גדול מהפוטים (Puts)
+                        if tc > tp:
+                            final_long.append(s)
+                except: pass
+                
         if final_long:
             st.balloons()
-            st.success(f"הסריקה הושלמה! נמצאו מניות מעניינות ללונג:")
             df_long_display = pd.DataFrame(final_long[:10])
+            df_long_display = df_long_display[["ticker", "price", "rsi"]]
             df_long_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי"]
-            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=True)
+            # סעיף 4: הצגת טבלה מצומצמת ויפה ללא חורים ריקים
+            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=False)
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
