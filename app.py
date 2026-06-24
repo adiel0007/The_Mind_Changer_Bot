@@ -4,27 +4,31 @@ import pandas as pd
 import numpy as np
 import os
 import requests
-import random  # מייבא את הספרייה כדי לפתור את ה-NameError
+import random
 
-# משיכת מפתח ה-API מה-Secrets וניקוי אוטומטי של תווים לא חוקיים
-RAW_KEY = st.secrets.get("GEMINI_API_KEY", "")
-GEMINI_API_KEY = RAW_KEY.replace('"', '').replace("'", "").strip() if RAW_KEY else ""
+# משיכת מפתח ה-API בצורה בטוחה מה-Secrets וניקוי תווים
+RAW_KEY = st.secrets.get("GEMINI_API_KEY", None)
+if RAW_KEY is not None:
+    GEMINI_API_KEY = str(RAW_KEY).replace('"', '').replace("'", "").strip()
+else:
+    GEMINI_API_KEY = ""
+
 FILENAME = "Stocks List.txt"
 
-# אתחול בטוח לחלוטין של ה-AI למניעת שגיאות ModuleNotFoundError
+# אתחול בטוח לחלוטין של ה-AI התומך במפתחות החדשים והישנים כאחד
 ai_client = None
-try:
-    if GEMINI_API_KEY:
+if GEMINI_API_KEY:
+    try:
         from google import genai
         from google.genai import types
         ai_client = genai.Client(api_key=GEMINI_API_KEY)
-except Exception:
-    ai_client = None
+    except Exception:
+        ai_client = None
 
-# הגדרת עיצוב הדף של Streamlit
+# הגדרת עיצוב הדף של Streamlit לחוויה מעולה בנייד ובמחשב
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
-# פונקציה לייצור כותרות דפנפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
+# פונקציה לייצור כותרות דפדפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -51,6 +55,7 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
 
+    /* תמונת רקע של בורסה וגרפים */
     .stApp {
         background-image: 
             linear-gradient(rgba(6, 9, 19, 0.90), rgba(6, 9, 19, 0.94)),
@@ -62,11 +67,13 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
+    /* כפיית כיוון RTL על כל האפליקציה בצורה גורפת */
     .stApp, div[data-testid="stVerticalBlock"], div[data-testid="stHorizontalBlock"] {
         direction: rtl !important;
         text-align: right !important;
     }
     
+    /* כותרת ראשית ממורכזת */
     .main-title {
         font-family: 'Orbitron', sans-serif;
         font-size: 3.8rem !important;
@@ -77,6 +84,7 @@ st.markdown("""
         text-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
     }
     
+    /* תת כותרת ממורכזת */
     .sub-title {
         font-size: 1.15rem;
         color: #cbd5e1;
@@ -86,6 +94,7 @@ st.markdown("""
         line-height: 1.7;
     }
     
+    /* עיצוב והגדלת כרטיסיות (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 12px;
         justify-content: center !important;
@@ -219,7 +228,7 @@ def calculate_rsi(close_prices, period=14):
 
 def ask_gemini(question):
     if not ai_client:
-        return "⚠️ מערכת ה-AI לא מאותחלת או שחסרה ספריית google-genai ב-requirements.txt."
+        return "⚠️ מערכת ה-AI לא מאותחלת. אנא ודא שהגדרת את ה-Secrets בענן בצורה תקינה."
     try:
         from google.genai import types
         system_instruction = "אתה אנליסט פיננסי בכיר ומנוסה מאוד. ענה בעברית מקצועית, שנונה, מדויקת וממוקדת שוק ההון."
@@ -315,7 +324,8 @@ with tab3:
                             recommendation_status = "קנייה מעורבת 🟢 (רוב האנליסטים ממליצים קנייה/החזקה)"
                         
                         else:
-                            rsi_status = "מחושב ע"י ה-AI באזורי ביקוש נייטרליים"
+                            # פתרון ה-SyntaxError על ידי החלפת הגרש של ע"י למילה המלאה "על ידי"
+                            rsi_status = "מחושב על ידי ה-AI באזורי ביקוש נייטרליים"
                             ma_status = "נסחרת בטווח הממוצעים התקופתיים שלה"
                             options_status = "נפחי מסחר אופציות מאוזנים"
                             earnings_status = "עקפה/עמדה בציפיות ההכנסה ברבעונים האחרונים"
