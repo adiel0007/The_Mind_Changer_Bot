@@ -36,7 +36,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* כפיית כיוון RTL על כל האפליקציה בצורה גורפת */
+    /* כפיית כיוון RTL על כל האפליקציה בצורה גורף */
     .stApp, div[data-testid="stVerticalBlock"], div[data-testid="stHorizontalBlock"] {
         direction: rtl !important;
         text-align: right !important;
@@ -143,7 +143,7 @@ st.markdown("""
         text-align: center !important;
     }
 
-    /* כפייה אבסולוטית של עיצוב כפתורים מקצועי בכל האתר - ביטול מוחלט של הריבוע הלבן */
+    /* כפייה אבסולוטית של עיצוב כפתורים מקצועי בכל האתר */
     div.stButton > button, div.stButton > button:focus, div.stButton > button:active {
         background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
         color: #ffffff !important;
@@ -157,7 +157,6 @@ st.markdown("""
         margin: 15px auto 0 auto !important;
         display: block !important;
         box-shadow: 0 4px 15px rgba(29, 78, 216, 0.4) !important;
-        text-shadow: none !important;
     }
     
     div.stButton > button:hover {
@@ -188,6 +187,13 @@ st.markdown("""
     .long-btn-style div.stButton > button:hover {
         background: linear-gradient(135deg, #10b981 0%, #065f46 100%) !important;
         box-shadow: 0 6px 20px rgba(5, 150, 105, 0.6) !important;
+    }
+
+    /* שינוי צבע הטקסט בתוך הודעות המידע (הקופסאות הכחולות) ללבן קריא */
+    div[data-testid="stNotification"] p {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        text-align: right !important;
     }
 
     /* עיצוב תיבות ההקלדה הלבנות (Inputs) */
@@ -286,7 +292,8 @@ with tab1:
                 '<p>סורק מניות לשורט, המבוסס על נתונים ייחודים שיכולים להגדיר מניות לשורט</p>', unsafe_allow_html=True)
     
     st.markdown('<div class="short-btn-style">', unsafe_allow_html=True)
-    run_short = st.button("🚀 הפעל סריקת שורט", key="btn_short")
+    # שינוי מיקום האמוג'י לצד שמאל (סעיף 1)
+    run_short = st.button("הפעל סריקת שורט 🚀", key="btn_short")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
     if run_short:
@@ -370,15 +377,48 @@ with tab2:
                 '<p>סורק מניות ללונג, המבוסס על נתונים ייחודים שיכולים להגדיר מניות ללונג</p>', unsafe_allow_html=True)
     
     st.markdown('<div class="long-btn-style">', unsafe_allow_html=True)
-    run_long = st.button("🚀 הפעל סריקת לונג", key="btn_long")
+    run_long = st.button("הפעל סריקת לונג 🚀", key="btn_long")
     st.markdown('</div></div>', unsafe_allow_html=True)
     
+    # הוספת מנגנון שלב אחר שלב ופס טעינה דינמי גם ללונג (סעיף 3)
     if run_long:
-        st.info("רדאר הלונג בבנייה קלה, בקרוב יוצגו כאן נתוני הקניות והדוחות המושלמים!")
+        tickers = get_all_tickers()
+        st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
+        progress_bar_long = st.progress(0)
+        final_long = []
+        
+        with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים ללונג..."):
+            try:
+                data = yf.download(tickers, period="6mo", group_by='ticker', progress=False, auto_adjust=True)
+                for idx, ticker in enumerate(tickers):
+                    try:
+                        if ticker not in data.columns.levels[0]: continue
+                        df = data[ticker].dropna()
+                        if len(df) < 50: continue
+                        
+                        current_price = float(df['Close'].iloc[-1])
+                        df['RSI'] = calculate_rsi(df['Close'])
+                        last_rsi = float(df['RSI'].iloc[-1])
+                        
+                        # סינון פשוט ללונג לצורך הפעלת הפס באופן מלא
+                        if last_rsi < 40: 
+                            final_long.append({"ticker": ticker, "price": current_price, "rsi": last_rsi})
+                    except: continue
+                    progress_bar_long.progress((idx + 1) / len(tickers))
+            except Exception as e:
+                st.error(f"שגיאה בהורדת הנתונים: {e}")
+                
+        if final_long:
+            st.balloons()
+            st.success(f"הסריקה הושלמה! נמצאו מניות מעניינות ללונג:")
+            df_long_display = pd.DataFrame(final_long[:10])
+            df_long_display.columns = ["סימול", "מחיר נוכחי", "RSI נוכחי"]
+            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}", "RSI נוכחי": "{:.1f}"}), use_container_width=True)
+        else:
+            st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
 
-# ==================== כרטיסיית מניה בודדת ו-AI (סידור מוחלט) ====================
+# ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
-    # הזזת ומרכוז הטקסט הראשי + הוספת תיאור קצר לעמוד (שינוי 2)
     st.markdown('<div class="center-header-block">'
                 '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
                 '<p>בעמוד זה תוכלו לקבל ניתוח טכני מהיר ומיידי של מדדי מפתח עבור כל מניה בשוק, או להתייעץ ולקבל תשובות מקצועיות וממוקדות מאנליסט ה-AI הבכיר של המערכת.</p>'
