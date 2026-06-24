@@ -172,7 +172,7 @@ st.markdown("""
         text-align: right !important;
     }
 
-    /* עיצוב הטבלאות ומרכוז אבסולוטי למניעת מרווחים */
+    /* עיצוב הטבלאות, מרכוז אבסולוטי לצמצום חורים מרווחים */
     div[data-testid="stDataFrame"] {
         background-color: #ffffff !important;
         border-radius: 12px !important;
@@ -371,19 +371,17 @@ with tab2:
                         close_day1 = float(df['Close'].iloc[-1])
                         close_day2 = float(df['Close'].iloc[-2])
                         close_day3 = float(df['Close'].iloc[-3])
-                        if not ((close_day1 > close_day3) and (close_day2 > close_day3)): continue
+                        if (close_day1 <= close_day3) or (close_day2 <= close_day3): continue
                         
-                        # קריטריון חדש: היסחרות ב-5 ימי המסחר האחרונים מתחת לממוצע 9 (MA9) בנרות יומיים
+                        # קריטריון חדש: היסחרות מתחת לממוצע נע 9 ב-4 ימי המסחר האחרונים ברציפות
                         df['MA9'] = df['Close'].rolling(window=9).mean()
                         
-                        # בדיקת 5 הימים האחרונים ברצף
-                        under_ma9_5days = True
-                        for i in range(1, 6):
-                            if float(df['Close'].iloc[-i]) >= float(df['MA9'].iloc[-i]):
-                                under_ma9_5days = False
-                                break
+                        under_ma9_day1 = float(df['Close'].iloc[-1]) < float(df['MA9'].iloc[-1])
+                        under_ma9_day2 = float(df['Close'].iloc[-2]) < float(df['MA9'].iloc[-2])
+                        under_ma9_day3 = float(df['Close'].iloc[-3]) < float(df['MA9'].iloc[-3])
+                        under_ma9_day4 = float(df['Close'].iloc[-4]) < float(df['MA9'].iloc[-4])
                         
-                        if under_ma9_5days:
+                        if under_ma9_day1 and under_ma9_day2 and under_ma9_day3 and under_ma9_day4:
                             stage1_passed_long.append({"ticker": ticker, "price": current_price})
                     except: continue
                     progress_bar_long.progress((idx + 1) / len(tickers))
@@ -405,7 +403,7 @@ with tab2:
                         tc = opt.calls['volume'].fillna(0).sum()
                         tp = opt.puts['volume'].fillna(0).sum()
                         
-                        # יחס אופציות קול (Calls) גדול מפוט (Puts)
+                        # קריטריון אופציות: יחס אופציות קול (Calls) גדול מפוט (Puts)
                         if tc > tp:
                             final_long.append(s)
                 except: pass
@@ -415,6 +413,7 @@ with tab2:
             df_long_display = pd.DataFrame(final_long[:10])
             df_long_display = df_long_display[["ticker", "price"]] 
             df_long_display.columns = ["סימול", "מחיר נוכחי"]
+            
             st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
         else:
             st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
