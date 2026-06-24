@@ -7,7 +7,7 @@ import requests
 import random
 import time
 
-# 🛠️ חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת השגיאה:
+# חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת שגיאות סינטקס ודף
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # משיכת מפתח ה-API בצורה בטוחה מה-Secrets וניקוי תווים
@@ -103,7 +103,7 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* 🛠️ עיצוב קשיח ודחיפת האייקונים/סמיילים לצד שמאל באופן אבסולוטי בטאבים */
+    /* 🛠️ עיצוב קשיח המיישר את כיתוב הטאב לימין ודוחף את הסמיילי/אייקון לשמאל */
     .stTabs [data-baseweb="tab-list"] {
         gap: 16px;
         justify-content: center !important;
@@ -115,7 +115,7 @@ st.markdown("""
         font-weight: 800 !important;  
         color: #94a3b8 !important;
         display: flex !important;
-        flex-direction: row-reverse !important; /* זורק את הסמיילי לצד שמאל של המילים */
+        flex-direction: row-reverse !important; /* זורק את האייקון/סמיילי לצד שמאל באופן אבסולוטי */
         align-items: center !important;
         gap: 10px !important;
     }
@@ -258,7 +258,7 @@ if "short_list" not in st.session_state: st.session_state.short_list = []
 if "long_list" not in st.session_state: st.session_state.long_list = []
 if "has_scanned" not in st.session_state: st.session_state.has_scanned = False
 
-# 🛠️ כפתור הפעלת הסורק המרכזי ממוקם כעת בצורה בולטת מעל הטאבים
+# כפתור הפעלת הסורק המרכזי ממוקם בראש הדף בצורה יציבה
 run_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום", key="btn_global_radar")
 
 if run_radar:
@@ -269,10 +269,12 @@ if run_radar:
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # לולאת סריקה חרישית (ללא הדפסת רשימות המניות שקופצות על המסך)
     for i, ticker in enumerate(tickers):
-        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔄 סורק אינדיקטורים: {ticker}...</span>", unsafe_allow_html=True)
+        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ סורק ומנתח אינדיקטורים בשוק... ({i+1}/{len(tickers)})</span>", unsafe_allow_html=True)
         try:
-            t = yf.Ticker(ticker)
+            # שימוש בטעינה מהירה מוגבלת בזמן למניעת תקיעות של שרת יאהו
+            t = yf.Ticker(ticker, session=session)
             hist = t.history(period="1mo", auto_adjust=True)
             if not hist.empty and len(hist) >= 14:
                 close_prices = hist['Close'].squeeze()
@@ -282,7 +284,7 @@ if run_radar:
                 volume = int(hist['Volume'].iloc[-1])
                 
                 # תנאי סינון מקצועיים לשורט
-                if last_price < ma9 and volume > 5000000:
+                if last_price < ma9 and volume > 1000000:
                     if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
                     elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
                     else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
@@ -297,20 +299,20 @@ if run_radar:
                     })
                     
                 # תנאי סינון מקצועיים ללונג
-                elif last_price > ma9 and volume > 5000000 and rsi > 50:
+                elif last_price > ma9 and volume > 1000000 and rsi > 45:
                     temp_long.append({
                         "סימול": ticker,
                         "מחיר אחרון": f"${last_price:.2f}",
                         "מדד RSI": f"{rsi:.1f}",
                         "מחזור מסחר": f"{volume:,}",
                         "ממוצע נע 9": f"${ma9:.2f}",
-                        "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 50) 📈"
+                        "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
                     })
         except:
             continue
         progress_bar.progress(int((i + 1) / len(tickers) * 100))
         
-    # ניקוי מוחלט של אלמנטי הסטטוס לאחר סיום מוצלח
+    # ניקוי מוחלט של אלמנטי הסטטוס מיד עם סיום הסריקה
     progress_bar.empty()
     status_text.empty()
     
@@ -329,7 +331,7 @@ with tab1:
     elif st.session_state.has_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
     else:
-        st.info("אנא לחץ על כפתור הסריקה המרכזי למעלה כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' למעלה כדי להציג את נתוני הראדאר.")
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
@@ -339,7 +341,7 @@ with tab2:
     elif st.session_state.has_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
-        st.info("אנא לחץ על כפתור הסריקה המרכזי למעלה כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' למעלה כדי להציג את נתוני הראדאר.")
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
@@ -376,7 +378,7 @@ with tab3:
                 time.sleep(0.1)
             
             try:
-                t = yf.Ticker(search_ticker)
+                t = yf.Ticker(search_ticker, session=session)
                 hist = t.history(period="1mo", auto_adjust=True)
                 if not hist.empty:
                     close_prices = hist['Close'].squeeze()
@@ -396,7 +398,6 @@ with tab3:
             
             progress_bar_ind.empty()
             status_text_ind.empty()
-            final_elapsed = time.time() - start_time
             show_results = True
 
         if show_results and active_ticker:
