@@ -225,8 +225,8 @@ def ask_gemini_with_retry(question, retries=2, delay=1.5):
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. בהצלחה 📈🔥</div>', unsafe_allow_html=True)
 
-# 🛠️ העברת האייקונים ("סמיילים") מצד ימין לצד שמאל בכל כרטיסיית טאב
-tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח mניה בודדת & AI 🔍"])
+# 🛠️ תיקון טעות ההקלדה (מניה במקום mניה) ומיקום האייקון משמאל
+tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח מניה בודדת & AI 🔍"])
 
 with tab1: st.info("רדאר שורט מוכן לפעולה.")
 with tab2: st.info("רדאר לונג מוכן לפעולה.")
