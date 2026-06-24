@@ -262,7 +262,9 @@ def get_all_tickers():
     return ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
 
 def calculate_rsi(close_prices, period=14):
-    delta = close_prices.diff()
+    # הבטחה שקבוצת המחירים היא סדרת פנדס שטוחה ונקייה
+    close_series = pd.Series(close_prices).squeeze()
+    delta = close_series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
@@ -484,11 +486,16 @@ with tab3:
                     with st.spinner("מושך נתונים..."):
                         t = yf.download(search_ticker, period="6mo", auto_adjust=True)
                         if not t.empty:
-                            t['RSI'] = calculate_rsi(t['Close'])
-                            last_row = t.iloc[-1]
+                            # שימוש ב-squeeze() כדי למנוע את באג ה-MultiIndex
+                            close_prices = t['Close'].squeeze()
+                            rsi_values = calculate_rsi(close_prices)
+                            
+                            last_price = float(close_prices.iloc[-1])
+                            last_rsi = float(rsi_values.iloc[-1])
+                            
                             st.markdown('<div class="result-box">', unsafe_allow_html=True)
-                            st.metric("מחיר נוכחי", f"${float(last_row['Close']):.2f}")
-                            st.metric("מדד RSI", f"{float(last_row['RSI']):.1f}")
+                            st.metric("מחיר נוכחי", f"${last_price:.2f}")
+                            st.metric("מדד RSI", f"{last_rsi:.1f}")
                             st.markdown('</div>', unsafe_allow_html=True)
                         else:
                             st.error("המניה לא נמצאה.")
