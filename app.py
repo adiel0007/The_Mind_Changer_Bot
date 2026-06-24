@@ -7,7 +7,7 @@ import requests
 import random
 import time
 
-# חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת שגיאות סינטקס ודף
+# חובה! הפקודה הראשונה ביותר של Streamlit בקוד למניעת שגיאות
 st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layout="wide")
 
 # משיכת מפתח ה-API בצורה בטוחה מה-Secrets וניקוי תווים
@@ -103,7 +103,7 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* 🛠️ עיצוב קשיח המיישר את כיתוב הטאב לימין ודוחף את הסמיילי/אייקון לשמאל */
+    /* עיצוב הטאבים - יישור הטקסט לימין ודחיפת הסמיילים/אייקונים לצד שמאל */
     .stTabs [data-baseweb="tab-list"] {
         gap: 16px;
         justify-content: center !important;
@@ -115,7 +115,7 @@ st.markdown("""
         font-weight: 800 !important;  
         color: #94a3b8 !important;
         display: flex !important;
-        flex-direction: row-reverse !important; /* זורק את האייקון/סמיילי לצד שמאל באופן אבסולוטי */
+        flex-direction: row-reverse !important; /* דוחף את האייקון/סמיילי שמאלה לסוף המשפט */
         align-items: center !important;
         gap: 10px !important;
     }
@@ -131,7 +131,7 @@ st.markdown("""
         padding: 12px 28px !important;
     }
     
-    /* עיצוב כפתור הסריקה המרכזי פרימיום */
+    /* עיצוב כפתור הסריקה המרכזי שיופיע למטה */
     div.stButton > button {
         background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
         color: #ffffff !important;
@@ -142,7 +142,7 @@ st.markdown("""
         border: none !important;
         width: auto !important;
         min-width: 280px !important;
-        margin: 20px auto 20px auto !important;
+        margin: 30px auto 20px auto !important;
         display: block !important;
         box-shadow: 0 4px 15px rgba(29, 78, 216, 0.4);
     }
@@ -220,7 +220,7 @@ def calculate_rsi(prices, period=14):
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / (loss + 1e-10)
-    rsi = 100 - (100 / (100 + rs))
+    rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
 
 def ask_gemini_with_retry(question, retries=2, delay=1.5):
@@ -258,68 +258,6 @@ if "short_list" not in st.session_state: st.session_state.short_list = []
 if "long_list" not in st.session_state: st.session_state.long_list = []
 if "has_scanned" not in st.session_state: st.session_state.has_scanned = False
 
-# כפתור הפעלת הסורק המרכזי ממוקם בראש הדף בצורה יציבה
-run_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום", key="btn_global_radar")
-
-if run_radar:
-    tickers = load_tickers_from_file()
-    temp_short = []
-    temp_long = []
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # לולאת סריקה חרישית (ללא הדפסת רשימות המניות שקופצות על המסך)
-    for i, ticker in enumerate(tickers):
-        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ סורק ומנתח אינדיקטורים בשוק... ({i+1}/{len(tickers)})</span>", unsafe_allow_html=True)
-        try:
-            # שימוש בטעינה מהירה מוגבלת בזמן למניעת תקיעות של שרת יאהו
-            t = yf.Ticker(ticker, session=session)
-            hist = t.history(period="1mo", auto_adjust=True)
-            if not hist.empty and len(hist) >= 14:
-                close_prices = hist['Close'].squeeze()
-                last_price = float(close_prices.iloc[-1])
-                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
-                rsi = calculate_rsi(close_prices)
-                volume = int(hist['Volume'].iloc[-1])
-                
-                # תנאי סינון מקצועיים לשורט
-                if last_price < ma9 and volume > 1000000:
-                    if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
-                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
-                    else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
-                        
-                    temp_short.append({
-                        "סימול": ticker,
-                        "מחיר אחרון": f"${last_price:.2f}",
-                        "מדד RSI": f"{rsi:.1f}",
-                        "מחזור מסחר": f"{volume:,}",
-                        "ממוצע נע 9": f"${ma9:.2f}",
-                        "קריטריון סינון": cond
-                    })
-                    
-                # תנאי סינון מקצועיים ללונג
-                elif last_price > ma9 and volume > 1000000 and rsi > 45:
-                    temp_long.append({
-                        "סימול": ticker,
-                        "מחיר אחרון": f"${last_price:.2f}",
-                        "מדד RSI": f"{rsi:.1f}",
-                        "מחזור מסחר": f"{volume:,}",
-                        "ממוצע נע 9": f"${ma9:.2f}",
-                        "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
-                    })
-        except:
-            continue
-        progress_bar.progress(int((i + 1) / len(tickers) * 100))
-        
-    # ניקוי מוחלט של אלמנטי הסטטוס מיד עם סיום הסריקה
-    progress_bar.empty()
-    status_text.empty()
-    
-    st.session_state.short_list = temp_short
-    st.session_state.long_list = temp_long
-    st.session_state.has_scanned = True
-
 # הגדרת הטאבים - הסמיילים מיושרים כעת לצד שמאל של המילים
 tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח מניה בודדת & AI 🔍"])
 
@@ -331,7 +269,7 @@ with tab1:
     elif st.session_state.has_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' למעלה כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
@@ -341,7 +279,7 @@ with tab2:
     elif st.session_state.has_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' למעלה כדי להציג את נתוני הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
@@ -355,8 +293,9 @@ with tab3:
     next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לקונזנזוס השוק"
     recommendation_status = "קנייה חזקה 🔥 (כ-88% מהאנליסטים ממליצים לונג)"
     ai_raw_data = "אנא הזן סימול מניה ולחץ על 'נתח מניה' כדי להפעיל את חוות דעת האנליסט."
-    show_results = False
-    active_ticker = ""
+    
+    # שימוש ב-Session State לתוצאות הניתוח הבודד כדי למנוע היעלמות בלחיצות אחרות
+    if "single_results" not in st.session_state: st.session_state.single_results = None
 
     with col1:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
@@ -365,8 +304,6 @@ with tab3:
         st.markdown('</div>', unsafe_allow_html=True)
         
         if run_analysis and search_ticker:
-            active_ticker = search_ticker
-            
             progress_bar_ind = st.progress(0)
             status_text_ind = st.empty()
             start_time = time.time()
@@ -398,21 +335,34 @@ with tab3:
             
             progress_bar_ind.empty()
             status_text_ind.empty()
-            show_results = True
+            
+            # שמירת התוצאות לבלוק התצוגה היציב
+            st.session_state.single_results = {
+                "ticker": search_ticker,
+                "rsi": rsi_status,
+                "ma": ma_status,
+                "options": options_status,
+                "earnings": earnings_status,
+                "next_quarter": next_quarter_status,
+                "recommendation": recommendation_status,
+                "ai_data": ai_raw_data
+            }
 
-        if show_results and active_ticker:
+        # תצוגה יציבה שאינה נעלמת בריענון
+        if st.session_state.single_results:
+            res = st.session_state.single_results
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
-            st.markdown(f'<div class="header-row-container"><div class="header-text-title">סקירת מניית {active_ticker}</div><div class="header-left-side"><div class="header-emoji">📊</div></div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="header-row-container"><div class="header-text-title">סקירת מניית {res["ticker"]}</div><div class="header-left-side"><div class="header-emoji">📊</div></div></div>', unsafe_allow_html=True)
             st.markdown('<hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;">', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">2. ניתוח ממוצעים נעים:</span><span class="metric-value">{ma_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">3. שוק האופציות (סנטימנט באחוזים):</span><span class="metric-value">{options_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות:</span><span class="metric-value">{earnings_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">5. צפי דוחות וצמיחה:</span><span class="metric-value">{next_quarter_status}</span></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק (באחוזים):</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{res["rsi"]}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">2. ניתוח ממוצעים נעים:</span><span class="metric-value">{res["ma"]}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">3. שוק האופציות (סנטימנט באחוזים):</span><span class="metric-value">{res["options"]}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות:</span><span class="metric-value">{res["earnings"]}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">5. צפי דוחות וצמיחה:</span><span class="metric-value">{res["next_quarter"]}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק (באחוזים):</span><span class="metric-value">{res["recommendation"]}</span></div>', unsafe_allow_html=True)
             st.markdown('<div style="margin-top:20px; padding:15px; background: rgba(255,255,255,0.03); border-radius:8px; border-right:4px solid #ffbc00;">', unsafe_allow_html=True)
             st.markdown('<h4 style="color:#ffffff;">7. פעילות החברה & חוות דעת אנליסט AI (תקציר ממוקד):</h4>', unsafe_allow_html=True)
-            st.markdown(f'<p style="line-height:1.7; color:#cbd5e1; text-align:right; direction:rtl;">{ai_raw_data}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="line-height:1.7; color:#cbd5e1; text-align:right; direction:rtl;">{res["ai_data"]}</p>', unsafe_allow_html=True)
             st.markdown('</div></div>', unsafe_allow_html=True)
 
     with col2:
@@ -425,3 +375,68 @@ with tab3:
             with st.spinner("ה-AI חושב ומנתח..."):
                 answer = ask_gemini_with_retry(user_q)
                 st.markdown(f'<div class="result-box"><h4 style="color:#ffffff;">📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl; color:#ffffff;">{answer}</p></div>', unsafe_allow_html=True)
+
+# ====================================================================
+#  כפתור החיפוש המרכזי ממוקם כעת באופן קבוע כאן - בתחתית המסך!
+# ====================================================================
+st.markdown('<div style="margin-top: 40px;">', unsafe_allow_html=True)
+run_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום", key="btn_global_radar")
+st.markdown('</div>', unsafe_allow_html=True)
+
+if run_radar:
+    tickers = load_tickers_from_file()
+    temp_short = []
+    temp_long = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, ticker in enumerate(tickers):
+        status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ סורק ומנתח אינדיקטורים בשוק... ({i+1}/{len(tickers)})</span>", unsafe_allow_html=True)
+        try:
+            t = yf.Ticker(ticker, session=session)
+            hist = t.history(period="1mo", auto_adjust=True)
+            if not hist.empty and len(hist) >= 14:
+                close_prices = hist['Close'].squeeze()
+                last_price = float(close_prices.iloc[-1])
+                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                rsi = calculate_rsi(close_prices)
+                
+                # תנאי סינון מקצועיים וריאליסטיים לשורט
+                if last_price < ma9:
+                    if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
+                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
+                    else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                        
+                    temp_short.append({
+                        "סימול": ticker,
+                        "מחיר אחרון": f"${last_price:.2f}",
+                        "מדד RSI": f"{rsi:.1f}",
+                        "ממוצע נע 9": f"${ma9:.2f}",
+                        "קריטריון סינון": cond
+                    })
+                    
+                # תנאי סינון מקצועיים וריאליסטיים ללונג
+                elif last_price > ma9 and rsi > 45:
+                    temp_long.append({
+                        "סימול": ticker,
+                        "מחיר אחרון": f"${last_price:.2f}",
+                        "מדד RSI": f"{rsi:.1f}",
+                        "ממוצע נע 9": f"${ma9:.2f}",
+                        "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
+                    })
+        except:
+            continue
+        progress_bar.progress(int((i + 1) / len(tickers) * 100))
+        
+    # ניקוי מוחלט של הסטטוסים בלבד!
+    progress_bar.empty()
+    status_text.empty()
+    
+    # שמירה לתוך ה-Session State
+    st.session_state.short_list = temp_short
+    st.session_state.long_list = temp_long
+    st.session_state.has_scanned = True
+    
+    # הזרקה חלקה ישירות ללא רענון דף אינסופי
+    st.experimental_user = st.experimental_user if hasattr(st, "experimental_user") else None
