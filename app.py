@@ -9,7 +9,7 @@ from google.genai import types
 
 # הגדרות בסיסיות
 GEMINI_API_KEY = "AQ.Ab8RN6JI56jLqTcysBdf4I4sWDgn89UCTGLzoT0y2ZVVL0giuw" 
-FILENAME = r"FILENAME = "Stocks List.txt""
+FILENAME = "FILENAME = "Stocks List.txt""
 
 # אתחול ה-AI של גוגל
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
