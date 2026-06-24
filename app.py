@@ -91,7 +91,6 @@ st.markdown("""
         line-height: 1.7;
     }
 
-    /* 🛠️ הגדלה ושינוי צבע הכותרות מעל תיבות ההקלדה ללבן בולט וברור */
     div[data-testid="stTextInput"] label, div[data-testid="stTextInput"] label p {
         color: #ffffff !important;
         font-weight: 700 !important;
@@ -100,7 +99,6 @@ st.markdown("""
         margin-bottom: 8px !important;
     }
 
-    /* תיקון צבע טקסטים קטנים ונלווים מסביב לשדות ללבן/אפור בהיר קריא */
     .stMarkdown p, .stMarkdown span {
         color: #ffffff !important;
     }
@@ -183,18 +181,27 @@ st.markdown("""
         font-weight: 700;
     }
     
-    /* קונטיינר לוגו חלופי מעוצב */
-    .alt-logo {
-        width: 55px;
-        height: 55px;
-        background: #ffbc00;
-        color: #060913;
-        font-size: 1.5rem;
-        font-weight: 900;
+    /* קומפוננטת כותרת עם אייקון בצד שמאל קיצוני */
+    .header-row-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+    }
+    .header-text-title {
+        margin: 0;
+        padding: 0;
+        color: #ffffff !important;
+        font-size: 1.6rem;
+        font-weight: 700;
+    }
+    .header-left-side {
         display: flex;
         align-items: center;
-        justify-content: center;
-        border-radius: 8px;
+        gap: 15px;
+    }
+    .header-emoji {
+        font-size: 1.6rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -243,7 +250,6 @@ with tab3:
                 status_text = st.empty()
                 start_time = time.time()
                 
-                # סימולציה של התקדמות ועדכון שניות בלייב
                 for percent_complete in range(1, 101, 10):
                     current_elapsed = time.time() - start_time
                     status_text.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מנתח נתונים ומנטרל חסימות שרת... זמן זורם: {current_elapsed:.1f} שניות</span>", unsafe_allow_html=True)
@@ -260,19 +266,8 @@ with tab3:
                 next_quarter_status = "צפי צמיחה חיובי של כ-12.5% בהתאם לקונזנזוס השוק"
                 recommendation_status = "קנייה חזקה 🔥 (כ-88% מהאנליסטים ממליצים לונג)"
                 
-                # חילוץ ובדיקת לוגו החברה
-                domain = DOMAINS_MAP.get(search_ticker, f"{search_ticker.lower()}.com")
-                logo_url = f"https://logo.clearbit.com/{domain}"
-                
-                # בדיקה מהירה אם הלוגו זמין, אחרת נשתמש בלוגו טקסט חלופי ומעוצב
-                try:
-                    logo_check = requests.get(logo_url, timeout=1.5)
-                    if logo_check.status_code != 200:
-                        logo_html = f'<div class="alt-logo">{search_ticker[:2]}</div>'
-                    else:
-                        logo_html = f'<img src="{logo_url}" width="55" style="border-radius:8px; background-color:white; padding:2px;">'
-                except:
-                    logo_html = f'<div class="alt-logo">{search_ticker[:2]}</div>'
+                # חילוץ הלוגו הרשמי המדויק לפי סימול המניה ממקור פיננסי מאובטח
+                logo_url = f"https://images.financialmodelingprep.com/v3/companies/v3/logo/{search_ticker}.png"
                 
                 # ניסיון קריאת נתוני שוק חיים במידה ואין חסימת IP
                 try:
@@ -300,17 +295,21 @@ with tab3:
                 progress_bar.empty()
                 status_text.empty()
                 
-                # חישוב זמן עיבוד סופר מדויק
                 final_elapsed = time.time() - start_time
                 
                 # ---- תצוגת הפלט הסופית המעוצבת ----
                 st.markdown('<div class="result-box">', unsafe_allow_html=True)
                 
-                logo_col1, logo_col2 = st.columns([0.88, 0.12])
-                with logo_col1:
-                    st.markdown(f'<h3 style="margin:0; padding:0; color:#ffffff;">📊 פרופיל פרימיום מקיף: {search_ticker}</h3>', unsafe_allow_html=True)
-                with logo_col2:
-                    st.markdown(logo_html, unsafe_allow_html=True)
+                # בניית שורת כותרת גמישה: כותרת מימין, לוגו ואייקון 📊 בקצה השמאלי הקיצוני ביותר
+                st.markdown(f"""
+                    <div class="header-row-container">
+                        <div class="header-text-title">סקירת מניית {search_ticker}</div>
+                        <div class="header-left-side">
+                            <img src="{logo_url}" width="42" style="border-radius:6px; background:transparent;" onerror="this.style.display='none';">
+                            <div class="header-emoji">📊</div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
                     
                 st.markdown('<hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 15px 0;">', unsafe_allow_html=True)
                 st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
