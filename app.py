@@ -28,15 +28,13 @@ st.markdown("""
         color: #c9d1d9;
     }
     
-    /* עיצוב כותרת ראשית ענקית - THE MIND CHANGER */
+    /* עיצוב כותרת ראשית ענקית - THE MIND CHANGER בצבע לבן */
     .main-title {
         font-family: 'Inter', sans-serif;
         font-size: 3.5rem !important;
         font-weight: 900;
         letter-spacing: -1px;
-        background: linear-gradient(90deg, #ffbc00 0%, #ff8800 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
         text-align: center;
         margin-top: 10px;
         margin-bottom: 5px;
@@ -48,6 +46,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 40px;
         font-weight: 300;
+        direction: rtl;
     }
     
     /* עיצוב כרטיסיות (Tabs) */
@@ -161,19 +160,21 @@ def ask_gemini(question):
     except Exception as e:
         return f"⚠️ שגיאה בחיבור ל-AI: {str(e)}"
 
-# --- כותרת ראשית מעוצבת של האתר ---
+# --- כותרת ראשית מעוצבת של האתר (שינוי 1) ---
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">מערכת רדאר מתקדמת לסריקת מניות וניתוח AI בזמן אמת</div>', unsafe_allow_html=True)
+
+# --- ברכת ברוכים הבאים בעמוד הראשי (שינוי 4) ---
+st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. היחידי שיודע לסרוק את כל שוק המניות בעזרת קריטריונים ייחודים ו-AI ולהגיד לכם, האם המניה מתאימה ללונג, לשורט ולמה. בהצלחה</div>', unsafe_allow_html=True)
 
 # חלוקה לכרטיסיות (Tabs)
 tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדאר לונג", "🔍 ניתוח מניה בודדת & AI"])
 
 # ==================== כרטיסיית רדאר שורט ====================
 with tab1:
+    # שינוי 2: עדכון הטקסט מתחת לכותרת הסורק
     st.markdown('<div class="rtl-text"><h3>🐻 סורק מניות לשורט (Short Swing)</h3>'
-                '<p style="color:#8b949e;">טווח: 15$-450$ | 3 ימים אדומים | RSI > 30 | מתחת ל-MA9 או MA100 | ווליום מתגבר | אופציות Put > 50%</p></div>', unsafe_allow_html=True)
+                '<p style="color:#8b949e; font-size: 1.1rem; margin-bottom: 20px;">סורק מניות לשורט, המבוסס על נתונים ייחודים שיכולים להגדיר מניות לשורט</p></div>', unsafe_allow_html=True)
     
-    # שימוש ב-container ייעודי לצבע כפתור אדום לשורט
     st.markdown('<div class="short-btn">', unsafe_allow_html=True)
     run_short = st.button("🚀 הפעל סריקת שורט")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -257,8 +258,9 @@ with tab1:
 
 # ==================== כרטיסיית רדאר לונג ====================
 with tab2:
+    # שינוי 3: עדכון הטקסט מתחת לכותרת הסורק
     st.markdown('<div class="rtl-text"><h3>🐂 סורק מניות ללונג (Long Swing)</h3>'
-                '<p style="color:#8b949e;">סריקת הזדמנויות קנייה ודוחות מושלמים מתוך רשימת המניות שלך.</p></div>', unsafe_allow_html=True)
+                '<p style="color:#8b949e; font-size: 1.1rem; margin-bottom: 20px;">סורק מניות ללונג, המבוסס על נתונים ייחודים שיכולים להגדיר מניות ללונג</p></div>', unsafe_allow_html=True)
     
     st.markdown('<div class="long-btn">', unsafe_allow_html=True)
     run_long = st.button("🚀 הפעל סריקת לונג")
