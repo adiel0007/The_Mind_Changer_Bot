@@ -1,4 +1,5 @@
-python-telegram-bot==20.8
+streamlit
 yfinance
 pandas
 numpy
+google-genai
