@@ -75,8 +75,8 @@ st.markdown("""
     }
     
     .stTabs [data-baseweb="tab"] p {
-        font-size: 1.3rem !important; /* הגדלת גודל הגופן של השם של הכרטיסיות */
-        font-weight: 800 !important;  /* הדגשה חזקה של הכותרת */
+        font-size: 1.3rem !important; 
+        font-weight: 800 !important;  
     }
     
     .stTabs [data-baseweb="tab"] {
@@ -132,15 +132,15 @@ st.markdown("""
         text-align: center !important;
         display: flex;
         justify-content: center;
-        margin-top: 20px;
-        margin-bottom: 10px;
+        margin-top: 15px !important;
+        margin-bottom: 10px !important;
     }
     
     div.stButton > button {
         color: #ffffff !important;
         font-weight: 700 !important;
-        font-size: 1.1rem !important;
-        padding: 14px 45px !important;
+        font-size: 1.05rem !important;
+        padding: 12px 45px !important;
         border-radius: 30px !important;
         border: none !important;
         width: auto !important;
@@ -149,7 +149,7 @@ st.markdown("""
         cursor: pointer;
     }
     
-    /* סגנונות צבע לכפתורים - ביטול מוחלט של הרקע הלבן */
+    /* סגנונות צבע לכפתורים */
     .short-btn-style div.stButton > button {
         background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
         box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4) !important;
@@ -177,8 +177,8 @@ st.markdown("""
         transform: translateY(-2px);
     }
 
-    /* עיצוב תיבות ההקלדה הלבנות (Inputs) */
-    div[data-testid="stTextInput"] input {
+    /* תיקון קשיח לצבע הפונט בתוך התיבות הלבנות (Inputs) - שחור קבוע תמיד */
+    div[data-testid="stTextInput"] input, div[data-testid="stTextInput"] input:focus {
         color: #000000 !important;           
         -webkit-text-fill-color: #000000 !important; 
         font-weight: 700 !important;          
@@ -191,29 +191,30 @@ st.markdown("""
         text-align: right !important;
     }
     
-    /* הגדלה והדגשה משמעותית של הטקסט מעל קוביות החיפוש */
+    /* הגדלה והדגשה של הטקסט מעל קוביות החיפוש */
     div[data-testid="stTextInput"] label p {
         color: #ffffff !important;
         font-weight: 900 !important;
-        font-size: 1.3rem !important; /* הגדלת הטקסט מעל הקוביות */
+        font-size: 1.3rem !important; 
         text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
     
     div[data-testid="stTextInput"] label {
         text-align: right !important;
         width: 100% !important;
-        margin-bottom: 12px !important;
+        margin-bottom: 5px !important;
     }
 
-    /* עיצוב אזורי החיפוש */
+    /* עיצוב אזורי החיפוש הנקיים ללא מלבנים מיותרים */
     .search-section {
         background: rgba(11, 17, 30, 0.85);
         border: 1px solid rgba(255, 255, 255, 0.07);
         border-radius: 16px;
         padding: 35px;
-        margin-top: 20px;
+        margin-top: 15px;
         backdrop-filter: blur(10px);
         box-shadow: 0 15px 30px rgba(0,0,0,0.5);
+        direction: rtl !important;
     }
 
     /* תיבת תוצאות יפה שנוצרת רק כשיש תוכן */
@@ -224,6 +225,8 @@ st.markdown("""
         border: 1px solid #1e293b; 
         margin-top: 25px;
         box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+        text-align: right !important;
+        direction: rtl !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -261,7 +264,7 @@ def ask_gemini(question):
 # --- כותרת ראשית ---
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
-# --- ברכת ברוכים הבאים בעמוד הראשי עם סמיילי מעודכן ---
+# --- ברכת ברוכים הבאים בעמוד הראשי ---
 st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. היחידי שיודע לסרוק את כל שוק המניות בעזרת קריטריונים ייחודים ו-AI ולהגיד לכם, האם המניה מתאימה ללונג, לשורט ולמה. בהצלחה 📈🔥</div>', unsafe_allow_html=True)
 
 # חלוקה לכרטיסיות (Tabs)
@@ -366,7 +369,7 @@ with tab2:
 
 # ==================== כרטיסיית מניה בודדת ו-AI ====================
 with tab3:
-    st.markdown('<div style="max-width:1100px; margin:20px auto 0 auto;"><h3>ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div style="max-width:1100px; margin:20px auto 10px auto;"><h3>ניתוח מניה ומנוע שאלות AI</h3></div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     
@@ -377,7 +380,6 @@ with tab3:
         run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
         st.markdown('</div></div>', unsafe_allow_html=True)
         
-        # אזור דינמי לתוצאות - מופיע רק לאחר הלחיצה ומבטל מלבנים ריקים מראש
         analysis_container = st.container()
         if run_analysis:
             with analysis_container:
@@ -403,7 +405,6 @@ with tab3:
         run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
         st.markdown('</div></div>', unsafe_allow_html=True)
         
-        # אזור דינמי לתשובת ה-AI - נוצר ומעוצב רק כשיש תשובה מוכנה
         ai_container = st.container()
         if run_ai:
             with ai_container:
@@ -411,6 +412,6 @@ with tab3:
                     with st.spinner("ה-AI חושב ומנתח..."):
                         answer = ask_gemini(user_q)
                         st.markdown(f'<div class="result-box">'
-                                    f'<h4>📋 תשובת האנליסט:</h4><p>{answer}</p></div>', unsafe_allow_html=True)
+                                    f'<h4>📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl;">{answer}</p></div>', unsafe_allow_html=True)
                 else:
                     st.warning("אנא הקלד שאלה תחילה.")
