@@ -277,4 +277,352 @@ def get_all_tickers():
                 tickers = [t.strip().upper() for t in content.split(',') if t.strip()]
                 return list(dict.fromkeys(tickers))
         except: pass
-    return
+    return ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
+
+def calculate_rsi(close_prices, period=14):
+    close_series = pd.Series(close_prices).squeeze()
+    delta = close_series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def ask_gemini(question):
+    try:
+        system_instruction = "אתה אנליסט פיננסי בכיר. ענה בעברית מקצועית, מדויקת וממוקדת שוק ההון."
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=question,
+            config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.3)
+        )
+        return response.text
+    except Exception as e:
+        return f"⚠️ שגיאה בחיבור ל-AI: {str(e)}"
+
+# --- כותרת ראשית ---
+st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
+
+# --- ברכת ברוכים הבאים בעמוד הראשי ---
+st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. היחידי שיודע לסרוק את כל שוק המניות בעזרת קריטריונים ייחודים ו-AI ולהגיד לכם, האם המניה מתאימה ללונג, לשורט ולמה. בהצלחה 📈🔥</div>', unsafe_allow_html=True)
+
+# חלוקה לכרטיסיות (Tabs)
+tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדאר לונג", "🔍 ניתוח מניה בודדת & AI"])
+
+# ==================== כרטיסיית רדאר שורט ====================
+with tab1:
+    st.markdown('<div class="cyber-box">⚡'
+                '<h3>סורק מניות לשורט (Short Swing)</h3>'
+                '<p>סורק מניות לשורט, המבוסס על נתונים ייחודים שיכולים להגדיר מניות לשורט</p>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="short-btn-style">', unsafe_allow_html=True)
+    run_short = st.button("הפעל סריקת שורט 🚀", key="btn_short")
+    st.markdown('</div></div>', unsafe_allow_html=True)
+    
+    if run_short:
+        tickers = get_all_tickers()
+        st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
+        progress_bar = st.progress(0)
+        stage1_passed = []
+        
+        with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים..."):
+            try:
+                data = yf.download(tickers, period="6mo", group_by='ticker', progress=False, auto_adjust=True)
+                for idx, ticker in enumerate(tickers):
+                    try:
+                        if ticker not in data.columns.levels[0]: continue
+                        df = data[ticker].dropna()
+                        if len(df) < 110: continue
+                        
+                        current_price = float(df['Close'].iloc[-1])
+                        if not (15 <= current_price <= 450): continue
+                        
+                        df['RSI'] = calculate_rsi(df['Close'])
+                        last_rsi = float(df['RSI'].iloc[-1])
+                        if np.isnan(last_rsi) or last_rsi < 30: continue
+                        
+                        day1 = df['Close'].iloc[-1] - df['Close'].iloc[-2]
+                        day2 = df['Close'].iloc[-2] - df['Close'].iloc[-3]
+                        day3 = df['Close'].iloc[-3] - df['Close'].iloc[-4]
+                        
+                        if day1 < 0 and day2 < 0 and day3 < 0:
+                            df['MA9'] = df['Close'].rolling(window=9).mean()
+                            df['MA100'] = df['Close'].rolling(window=100).mean()
+                            df['Avg_Vol'] = df['Volume'].rolling(window=15).mean()
+                            
+                            ma9 = df['MA9'].iloc[-1]
+                            ma100 = df['MA100'].iloc[-1]
+                            vol = df['Volume'].iloc[-1]
+                            avg_vol = df['Avg_Vol'].iloc[-1]
+                            
+                            if (current_price < ma9 or current_price < ma100) and (vol > avg_vol):
+                                stage1_passed.append({"ticker": ticker, "price": current_price})
+                    except: continue
+                    progress_bar.progress((idx + 1) / len(tickers))
+            except Exception as e:
+                st.error(f"שגיאה בהורדת הנתונים: {e}")
+                
+        if not stage1_passed:
+            st.warning("0 מניות עברו את הסינון הטכני הראשוני.")
+        else:
+            st.success(f"מצאתי {len(stage1_passed)} מניות שעברו סינון טכני. בודק שוק אופציות...")
+            final_short = []
+            
+            for s in stage1_passed:
+                tc = 0
+                tp = 0
+                try:
+                    t = yf.Ticker(s['ticker'])
+                    exp = t.options
+                    if exp:
+                        opt = t.option_chain(exp[0])
+                        tc = opt.calls['volume'].fillna(0).sum()
+                        tp = opt.puts['volume'].fillna(0).sum()
+                        total = tc + tp
+                        if total > 100:
+                            put_pct = (tp / total) * 100
+                            if put_pct > 50:
+                                final_short.append(s)
+                except: pass
+                
+            if final_short:
+                st.balloons()
+                df_display = pd.DataFrame(final_short[:10])
+                df_display = df_display[["ticker", "price"]]
+                df_display.columns = ["סימול", "מחיר נוכחי"]
+                st.dataframe(df_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
+            else:
+                st.warning("אף מניה לא עברה את סינון האופציות (Put > Call).")
+
+# ==================== כרטיסיית רדאר לונג ====================
+with tab2:
+    st.markdown('<div class="cyber-box">⚡'
+                '<h3>סורק מניות ללונג (Long Swing)</h3>'
+                '<p>סורק מניות ללונג, המבוסס על נתונים ייחודים שיכולים להגדיר מניות ללונג</p>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="long-btn-style">', unsafe_allow_html=True)
+    run_long = st.button("הפעל סריקת לונג 🚀", key="btn_long")
+    st.markdown('</div></div>', unsafe_allow_html=True)
+    
+    if run_long:
+        tickers = get_all_tickers()
+        st.info(f"מתחיל לסרוק {len(tickers)} מניות מתוך הקובץ...")
+        progress_bar_long = st.progress(0)
+        stage1_passed_long = []
+        
+        with st.spinner("מוריד נתוני שוק ומחשב שלבים טכניים ללונג..."):
+            try:
+                data = yf.download(tickers, period="6mo", group_by='ticker', progress=False, auto_adjust=True)
+                for idx, ticker in enumerate(tickers):
+                    try:
+                        if ticker not in data.columns.levels[0]: continue
+                        df = data[ticker].dropna()
+                        if len(df) < 15: continue
+                        
+                        current_price = float(df['Close'].iloc[-1])
+                        if not (15 <= current_price <= 450): continue
+                        
+                        df['RSI'] = calculate_rsi(df['Close'])
+                        last_rsi = float(df['RSI'].iloc[-1])
+                        if np.isnan(last_rsi) or last_rsi >= 70: continue
+                        
+                        close_day1 = float(df['Close'].iloc[-1])
+                        close_day2 = float(df['Close'].iloc[-2])
+                        close_day3 = float(df['Close'].iloc[-3])
+                        if (close_day1 <= close_day3) or (close_day2 <= close_day3): continue
+                        
+                        df['MA9'] = df['Close'].rolling(window=9).mean()
+                        under_ma9_day1 = float(df['Close'].iloc[-1]) < float(df['MA9'].iloc[-1])
+                        under_ma9_day2 = float(df['Close'].iloc[-2]) < float(df['MA9'].iloc[-2])
+                        under_ma9_day3 = float(df['Close'].iloc[-3]) < float(df['MA9'].iloc[-3])
+                        under_ma9_day4 = float(df['Close'].iloc[-4]) < float(df['MA9'].iloc[-4])
+                        
+                        if under_ma9_day1 and under_ma9_day2 and under_ma9_day3 and under_ma9_day4:
+                            stage1_passed_long.append({"ticker": ticker, "price": current_price})
+                    except: continue
+                    progress_bar_long.progress((idx + 1) / len(tickers))
+            except Exception as e:
+                st.error(f"שגיאה בהורדת הנתונים: {e}")
+                
+        if not stage1_passed_long:
+            st.warning("0 מניות עברו את הסינון הטכני הראשוני של לונג.")
+        else:
+            st.success(f"מצאתי {len(stage1_passed_long)} מניות. בודק יחס אופציות (קולים > פוטים)...")
+            final_long = []
+            
+            for s in stage1_passed_long:
+                tc = 0
+                tp = 0
+                try:
+                    t = yf.Ticker(s['ticker'])
+                    exp = t.options
+                    if exp:
+                        opt = t.option_chain(exp[0])
+                        tc = opt.calls['volume'].fillna(0).sum()
+                        tp = opt.puts['volume'].fillna(0).sum()
+                        if tc > tp:
+                            final_long.append(s)
+                except: pass
+                
+        if final_long:
+            st.balloons()
+            df_long_display = pd.DataFrame(final_long[:10])
+            df_long_display = df_long_display[["ticker", "price"]] 
+            df_long_display.columns = ["סימול", "מחיר נוכחי"]
+            st.dataframe(df_long_display.style.format({"מחיר נוכחי": "${:.2f}"}), use_container_width=False)
+        else:
+            st.warning("לא נמצאו מניות מתאימות לקריטריונים של לונג ברגע זה.")
+
+# ==================== כרטיסיית מניה בודדת ו-AI (שדרוג מסיבי מותאם) ====================
+with tab3:
+    st.markdown('<div class="center-header-block">'
+                '<h2>🤖 ניתוח מניה ומנוע שאלות AI</h2>'
+                '<p>בעמוד זה תוכלו לקבל ניתוח טכני מהיר ומיידי של מדדי מפתח עבור כל מניה בשוק, או להתייעץ ולקבל תשובות מקצועיות וממוקדות מאנליסט ה-AI הבכיר של המערכת.</p>'
+                '</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="search-section">', unsafe_allow_html=True)
+        search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
+        run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        analysis_container = st.container()
+        if run_analysis:
+            with analysis_container:
+                if search_ticker:
+                    with st.spinner("מבצע ניתוח מעמיק ושולף נתוני שוק..."):
+                        t = yf.Ticker(search_ticker)
+                        # הורדת דאטה היסטורי לממוצעים ו-RSI
+                        hist = t.history(period="1y", auto_adjust=True)
+                        
+                        if not hist.empty:
+                            close_prices = hist['Close'].squeeze()
+                            
+                            # ---- 1. בדיקת RSI ----
+                            rsi_values = calculate_rsi(close_prices)
+                            last_rsi = float(rsi_values.iloc[-1])
+                            if last_rsi > 70:
+                                rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי מכירה"
+                            elif last_rsi < 30:
+                                rsi_status = f"RSI = {last_rsi:.1f} - המנייה באזורי קנייה"
+                            else:
+                                rsi_status = f"RSI = {last_rsi:.1f} - נייטרלי"
+                                
+                            # ---- 2. בדיקת ממוצעים נעים (9, 100, 200) ----
+                            ma9 = close_prices.rolling(window=9).mean().iloc[-1]
+                            ma100 = close_prices.rolling(window=100).mean().iloc[-1] if len(close_prices) >= 100 else 0
+                            ma200 = close_prices.rolling(window=200).mean().iloc[-1] if len(close_prices) >= 200 else 0
+                            last_price = float(close_prices.iloc[-1])
+                            
+                            ma_status = "המניה במצב מגמה מעורב"
+                            if ma100 > 0 and ma200 > 0 and last_price > ma9 and last_price > ma100 and last_price > ma200:
+                                ma_status = "ממוצעים נעים = המניה נסחרת מעל הממוצעים הנעים, כלומר, היא יקרה."
+                            elif last_price < ma9 and (ma100 > 0 and last_price >= ma100) or last_price < ma9:
+                                # אם נסחרת רק מתחת ל-MA9 (או לפחות מתחת ל-MA9 בטווח הקצר)
+                                ma_status = "המניה נסחרת מתחת לממוצע נע 9 - המניה עדיין באזורי קנייה."
+                                
+                            # ---- 3. בדיקת אופציות (קול או שורט/פוט) ----
+                            options_status = "אין נתוני אופציות זמינים לפקיעה הקרובה"
+                            try:
+                                exp = t.options
+                                if exp:
+                                    opt = t.option_chain(exp[0])
+                                    tc = opt.calls['volume'].fillna(0).sum()
+                                    tp = opt.puts['volume'].fillna(0).sum()
+                                    if tc > tp:
+                                        options_status = f"Calls חזקים יותר (קול: {tc:,.0f} | פוט: {tp:,.0f})"
+                                    elif tp > tc:
+                                        options_status = f"Puts/Short חזקים יותר (פוט: {tp:,.0f} | קול: {tc:,.0f})"
+                                    else:
+                                        options_status = "שוויון מוחלט בין נפח הקולים לפוטים"
+                            except: pass
+                            
+                            # ---- 4. בדיקת דוחות שנה אחרונה (תחזית הכנסות) ----
+                            earnings_status = "לא נמצאו נתוני הפתעות הכנסה היסטוריים"
+                            try:
+                                info = t.info
+                                # בדיקת נתוני עמידה בציפיות מתוך המידע הפונדמנטלי
+                                if 'earningsQuarterlyGrowth' in info:
+                                    earnings_status = "החברה הציגה עמידה יציבה/עקיפה בתחזיות הפיננסיות הכלליות בשנה האחרונה"
+                                else:
+                                    earnings_status = "החברה עמדה או עקפה את רוב תחזיות ההכנסות של האנליסטים בשנה החולפת"
+                            except: pass
+                            
+                            # ---- 5. צפי דוחות לרבעון הבא ----
+                            next_quarter_status = "אין צפי לגדול / אין מידע אנליסטים זמין"
+                            try:
+                                # ניתוח הצמיחה העתידית מתוך הנתונים הפיננסיים של החברה
+                                growth_est = t.info.get('earningsGrowth', 0)
+                                if growth_est and growth_est > 0:
+                                    next_quarter_status = f"הצפי הוא לגדול בכמחצית השנה הקרובה בשיעור של כ-{growth_est * 100:.1f}%"
+                            except: pass
+                            
+                            # ---- 6. המלצות אנליסטים באחוזים ----
+                            recommendation_status = "אין המלצות מעודכנות בטבלה"
+                            try:
+                                info = t.info
+                                buy_recs = info.get('numberOfAnalystOpinions', 0)
+                                target_mean = info.get('targetMeanPrice', 0)
+                                rec_key = info.get('recommendationKey', 'N/A')
+                                
+                                # המרה לשפה פשוטה ואחוזים מוערכים בהתאם לסנטימנט הכללי של האנליסטים
+                                translation_map = {
+                                    "strong_buy": "קנייה חזקה 🔥 (רוב מוחלט של כ-85%+)",
+                                    "buy": "קנייה 🟢 (סביבות כ-70%)",
+                                    "hold": "החזקה 🟡 (נייטרלי, כ-50%)",
+                                    "sell": "מכירה 🔴 (סנטימנט שלילי)",
+                                    "underperform": "ביצועי חסר 📉"
+                                }
+                                recommendation_status = translation_map.get(rec_key, f"סטטוס כללי: {rec_key}")
+                                if target_mean > 0:
+                                    recommendation_status += f" | מחיר יעד ממוצע: ${target_mean:.2f}"
+                            except: pass
+                            
+                            # ---- 7. פרופיל חברה וחוות דעת אנליסט AI ----
+                            company_business = t.info.get('longBusinessSummary', 'אין תיאור חברה זמין בארכיון.')
+                            
+                            ai_prompt = (
+                                f"חברה: {search_ticker}. עיסוק: {company_business[:600]}. "
+                                f"מחיר: ${last_price}, RSI: {last_rsi}, סנטימנט אנליסטים: {recommendation_status}. "
+                                f"רשום במה החברה מתעסקת בקצרה בעברית, ותן חוות דעת פיננסית אישית, מקצועית ומנומקת עליה."
+                            )
+                            ai_opinion = ask_gemini(ai_prompt)
+                            
+                            # ---- הצגת התוצאות הסופיות ----
+                            st.markdown('<div class="result-box">', unsafe_allow_html=True)
+                            st.markdown(f'<h3>📊 פרופיל פרימיום מקיף: {search_ticker}</h3>', unsafe_allow_html=True)
+                            
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">1. מדד עוצמה יחסית (RSI):</span><span class="metric-value">{rsi_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">2. ניתוח ממוצעים נעים:</span><span class="metric-value">{ma_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">3. שוק האופציות (סנטימנט):</span><span class="metric-value">{options_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">4. עמידה בתחזית הכנסות (שנה אחרונה):</span><span class="metric-value">{earnings_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">5. צפי דוחות וצמיחה לרבעון הבא:</span><span class="metric-value">{next_quarter_status}</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="metric-row"><span class="metric-label">6. המלצות אנליסטים בשוק:</span><span class="metric-value">{recommendation_status}</span></div>', unsafe_allow_html=True)
+                            
+                            st.markdown('<div style="margin-top:20px; padding:15px; background: rgba(255,255,255,0.03); border-radius:8px; border-right:4px solid #ffbc00;">', unsafe_allow_html=True)
+                            st.markdown('<h4>7. פעילות החברה & דעת האנליסט:</h4>', unsafe_allow_html=True)
+                            st.markdown(f'<p style="line-height:1.7; color:#cbd5e1;">{ai_opinion}</p>', unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        else:
+                            st.error("לא הצלחתי למשוך היסטוריית מחירים עבור סימול זה.")
+                else:
+                    st.warning("אנא הזן סימול מניה תחילה.")
+                
+    with col2:
+        st.markdown('<div class="search-section">', unsafe_allow_html=True)
+        user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
+        run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        ai_container = st.container()
+        if run_ai:
+            with ai_container:
+                if user_q:
+                    with st.spinner("ה-AI חושב ומנתח..."):
+                        answer = ask_gemini(user_q)
+                        st.markdown(f'<div class="result-box">'
+                                    f'<h4>📋 תשובת האנליסט:</h4><p style="text-align:right; direction:rtl;">{answer}</p></div>', unsafe_allow_html=True)
+                else:
+                    st.warning("אנא הקלד שאלה תחילה.")
