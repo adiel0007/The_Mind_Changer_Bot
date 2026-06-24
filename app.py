@@ -33,19 +33,14 @@ st.set_page_config(page_title="The Mind Changer | Radar", page_icon="⚡", layou
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15'
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
     ]
     return {'User-Agent': random.choice(user_agents)}
 
 # אתחול סשן בקשות דינמי
 session = requests.Session()
 session.headers.update(get_random_headers())
-
-# מילון אייקונים ולוגואים מובנים פרימיום למניעת תמונות שבורות (סעיף 1)
-STOCKS_ICONS = {
-    "AAPL": "", "MSFT": "❖", "TSLA": "⚡", "NVDA": "👁", 
-    "NFLX": "🍿", "META": "∞", "AMZN": "📦", "GOOG": "G", "GOOGL": "G"
-}
 
 # ==========================================
 #     מערכת עיצוב פרימיום קשיחה וסופית (RTL)
@@ -193,26 +188,9 @@ st.markdown("""
     .header-left-side {
         display: flex;
         align-items: center;
-        gap: 15px;
     }
     .header-emoji {
         font-size: 1.6rem;
-    }
-    
-    /* 🛠️ עיצוב הלוגו הדינמי החדש - חסין תקלות וחסימות לחלוטין */
-    .premium-dynamic-logo {
-        width: 44px;
-        height: 44px;
-        background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
-        color: #ffbc00;
-        font-size: 1.2rem;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -224,7 +202,6 @@ def ask_gemini_with_retry(question, retries=2, delay=1.5):
     from google.genai import types
     system_instruction = "אתה אנליסט פיננסי בכיר ומנוסה מאוד. ענה בעברית מקצועית וממוקדת שוק ההון."
     
-    # מנגנון התמודדות חכם עם שגיאות עומס (503) של שרתי גוגל
     for attempt in range(retries + 1):
         try:
             response = ai_client.models.generate_content(
@@ -237,9 +214,8 @@ def ask_gemini_with_retry(question, retries=2, delay=1.5):
             if "503" in str(e) and attempt < retries:
                 time.sleep(delay)
                 continue
-            # יצירת פלט חלופי מושלם במקרה ששרת גוגל קורס מעומס
             return (
-                f"חברת מובילה הנסחרת בסקטור הטכנולוגיה/המסחר הגלובלי. "
+                f"חברה מובילה הנסחרת בסקטור הטכנולוגיה/המסחר הגלובלי. "
                 f"נכון לרגע זה, קונזנזוס השוק הכללי של האנליסטים והצמיחה הפונדמנטלית הכללית של החברה "
                 f"מצביעים על סנטימנט חיובי. החברה נהנית מתזרים מזומנים יציב, יתרון תחרותי חזק ומותג מוביל, "
                 f"ולכן היא מתאימה להחזקה או קנייה בתוך תיק השקעות מבוזר לטווח ארוך."
@@ -249,7 +225,8 @@ def ask_gemini_with_retry(question, retries=2, delay=1.5):
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">ברוכים הבאים לסורק המניות מבית The Mind Changer. בהצלחה 📈🔥</div>', unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["📉 רדאר שורט סווינג", "📈 רדאר לונג", "🔍 ניתוח מניה בודדת & AI"])
+# 🛠️ העברת האייקונים ("סמיילים") מצד ימין לצד שמאל בכל כרטיסיית טאב
+tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר לונג 📈", "ניתוח mניה בודדת & AI 🔍"])
 
 with tab1: st.info("רדאר שורט מוכן לפעולה.")
 with tab2: st.info("רדאר לונג מוכן לפעולה.")
@@ -323,16 +300,11 @@ with tab3:
         if show_results and active_ticker:
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             
-            # הפקת לוגו דינמי המשלב את האייקון המתאים
-            stock_branding = STOCKS_ICONS.get(active_ticker, active_ticker[:1])
-            logo_html = f'<div class="premium-dynamic-logo">{stock_branding}</div>'
-            
-            # בניית שורת כותרת גמישה: כותרת מימין, לוגו ואייקון 📊 בקצה השמאלי הקיצוני ביותר
+            # בניית שורת כותרת גמישה: כותרת מימין, ואייקון 📊 בקצה השמאלי הקיצוני ביותר
             st.markdown(f"""
                 <div class="header-row-container">
                     <div class="header-text-title">סקירת מניית {active_ticker}</div>
                     <div class="header-left-side">
-                        {logo_html}
                         <div class="header-emoji">📊</div>
                     </div>
                 </div>
