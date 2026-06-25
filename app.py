@@ -96,7 +96,7 @@ st.markdown("""
         color: #ffffff;
         text-align: center !important;
         margin-top: 25px;
-        margin-bottom: 30px;
+        margin-bottom: 15px;
         text-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
     }
     
@@ -179,6 +179,9 @@ st.markdown("""
 
 # כותרת האתר המרכזית המובילה
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
+
+# 🛠️ שדרוג 1: הוספת תת-הכותרת הדינמית והקריאה בעיצוב RTL עם סמיילי בסופה
+st.markdown('<div style="text-align: center; font-size: 1.2rem; color: #94a3b8; margin-top: -10px; margin-bottom: 35px; direction: rtl; font-weight: 500; padding: 0 20px; line-height: 1.6;">רדאר המניות היחידי שיודע לסנן על פי קריטריונים ייחודים עם שילוב של AI - על מניות ללונג, שורט, או לבדוק לכם על מניות מה המצב שלכם. תהנו ✨</div>', unsafe_allow_html=True)
 
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
@@ -297,7 +300,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                 # 📈 קריטריונים רדאר לונג
                 if mode == 'long' and last_price > ma9 and rsi < 70 and volume > 1000000:
                     is_above_all_three = (last_price > ma9) and (last_price > ma100) and (last_price > ma200)
-                    # 🛠️ חוק סינון חדש: אם המניה נסחרת בו-זמנית מתחת לשלושת הממוצעים (9, 100, 200), היא נחסמת
                     is_below_all_three = (last_price < ma9) and (last_price < ma100) and (last_price < ma200)
                     
                     if not is_above_all_three and not is_below_all_three:
@@ -390,7 +392,8 @@ with tab1:
         st.info("אנא לחץ על כפתור 'התחל סריקת שוק וזיהוי מומנטום שורט' כדי להפעיל את הרדאר.")
 
 with tab2:
-    st.markdown('<h2 style="text-align:center; color:#ffffff;">📈 רדאר מניות פוטנציאליות ללונג</h2>', unsafe_allow_html=True)
+    # 🛠️ שדרוג 2: שינוי כותרת הטאבלט והעברת ה-emoji לצד שמאל (סוף מחרוזת ב-RTL) כמבוקש ב-image_74b11e.jpg
+    st.markdown('<h2 style="text-align:center; color:#ffffff;">רדאר מניות ללונג 📈</h2>', unsafe_allow_html=True)
         
     run_long_radar = st.button("התחל סריקת שוק וזיהוי מומנטום לונג ⚡", key="btn_long_radar")
     
