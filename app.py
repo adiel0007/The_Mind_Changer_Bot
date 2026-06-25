@@ -222,7 +222,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                     try:
-                        # 🛠️ שינוי קריטי: הגדלת תקופת ההורדה ל-1y לתמיכה בחישוב ממוצע 200
                         chunk_data = yf.download(
                             tickers_str, 
                             period="1y", 
@@ -271,14 +270,12 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                     with open(os.devnull, 'w') as devnull:
                         with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                             t = yf.Ticker(ticker, session=session)
-                            # 🛠️ שינוי קריטי: הגדלת תקופת ההורדה לגיבוי ל-1y לתמיכה בחישוב ממוצע 200
                             df_ticker = t.history(period="1y", interval="1d", auto_adjust=False, actions=False)
                 
                 if df_ticker.empty:
                     continue
                 
                 df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
-                # 🛠️ רף מינימום שונה ל-200 ימים כדי לאפשר חישוב ממוצע נע 200 בצורה תקינה
                 if len(df_ticker) < 200:
                     continue
                 
@@ -288,7 +285,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                 last_price = float(close_prices.iloc[-1])
                 rsi = calculate_rsi(close_prices)
                 
-                # 🛠️ חישוב שלושת הממוצעים הנעים
                 ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                 ma100 = float(close_prices.rolling(window=100).mean().iloc[-1])
                 ma200 = float(close_prices.rolling(window=200).mean().iloc[-1])
@@ -300,14 +296,13 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                 
                 # 📈 קריטריונים רדאר לונג
                 if mode == 'long' and last_price > ma9 and rsi < 70 and volume > 1000000:
-                    # 🛠️ תיקון 2: חוק הסינון החדש - אם המניה נסחרת בו-זמנית מעל 9, 100 ו-200, היא נחסמת ולא תופיע
                     is_above_all_three = (last_price > ma9) and (last_price > ma100) and (last_price > ma200)
+                    # 🛠️ חוק סינון חדש: אם המניה נסחרת בו-זמנית מתחת לשלושת הממוצעים (9, 100, 200), היא נחסמת
+                    is_below_all_three = (last_price < ma9) and (last_price < ma100) and (last_price < ma200)
                     
-                    if not is_above_all_three:
+                    if not is_above_all_three and not is_below_all_three:
                         is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
                         is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
-                        
-                        # 🛠️ תיקון 1: נר סגירה אחרון חייב להיות גבוה מהיום שלפניו
                         is_close_higher_than_yesterday = float(close_prices.iloc[-1]) > float(close_prices.iloc[-2])
                         
                         if is_today_green and is_yesterday_green and is_close_higher_than_yesterday:
@@ -316,7 +311,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                                 "מחיר אחרון": f"${last_price:.2f}"
                             })
                 
-                # 📉 קריטריונים רדאר שורט סווינג 
+                # 📉 קריטריונים רדאר שורט סווינג
                 elif mode == 'short' and last_price < ma9 and rsi > 30 and volume > 1000000:
                     is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
                     is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
@@ -396,7 +391,7 @@ with tab1:
 
 with tab2:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">📈 רדאר מניות פוטנציאליות ללונג</h2>', unsafe_allow_html=True)
-    
+        
     run_long_radar = st.button("התחל סריקת שוק וזיהוי מומנטום לונג ⚡", key="btn_long_radar")
     
     if run_long_radar:
