@@ -173,33 +173,13 @@ st.markdown("""
         color: #ffffff !important;
         font-weight: 700;
     }
-    
-    .header-row-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-    }
-    .header-text-title {
-        margin: 0;
-        padding: 0;
-        color: #ffffff !important;
-        font-size: 1.6rem;
-        font-weight: 700;
-    }
-    .header-left-side {
-        display: flex;
-        align-items: center;
-    }
-    .header-emoji {
-        font-size: 1.6rem;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 # כותרת האתר המרכזית המובילה
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
+# 🛠️ תיקון ארכיטקטוני 1: פירוק פסיקים, נקודה-פסיק ורווחים לקבלת רשימת סימולים נקייה לחלוטין
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
@@ -207,7 +187,11 @@ def load_tickers_from_file():
             f.write("\n".join(default_stocks))
         return default_stocks
     with open(FILENAME, "r") as f:
-        return [line.strip().upper() for line in f if line.strip()]
+        raw_content = f.read()
+        # החלפת פסיקים וסימני הפרדה ברווחים נקיים
+        cleaned_content = raw_content.replace(",", " ").replace(";", " ").replace("\n", " ")
+        # יצירת רשימה מזוקקת של מניות ללא כפילויות או רווחים מיותרים
+        return [token.strip().upper() for token in cleaned_content.split() if token.strip()]
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -241,6 +225,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                     try:
+                        # 🛠️ תיקון ארכיטקטוני 2: הוספת threads=False למניעת קפיצות והבהובי שגיאות על המסך
                         chunk_data = yf.download(
                             tickers_str, 
                             period="2mo", 
@@ -249,17 +234,16 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                             auto_adjust=False, 
                             progress=False, 
                             ignore_tz=True,
+                            threads=False,
                             session=session
                         )
                     except:
                         chunk_data = pd.DataFrame()
             
-            # 🛠️ תיקון קריטי: מוודאים שחזר מידע מספרי אמיתי (ולא מטריצה של NaNs בגלל חסימת שרת)
             if not chunk_data.empty and chunk_data.notna().any().any():
                 break
             time.sleep(1.5)
         
-        # עיבוד הנתונים של הקבוצה עם מנגנון הגנה דינמי למניה בודדת
         for ticker in chunk:
             total_processed += 1
             pct = int((total_processed / total_tickers) * 100)
@@ -279,7 +263,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             df_ticker = pd.DataFrame()
             
             try:
-                # אופציה א': חילוץ מתוך הבלוק הקבוצתי שהורד בהצלחה
+                # אופציה א': חילוץ מתוך הבלוק הקבוצתי
                 if not chunk_data.empty and chunk_data.notna().any().any():
                     if isinstance(chunk_data.columns, pd.MultiIndex):
                         if ticker in chunk_data.columns.levels[0]:
@@ -287,7 +271,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                     else:
                         df_ticker = chunk_data
                 
-                # 🛠️ אופציה ב' (גיבוי אבסולוטי לחסינות ענן): אם הבלוק הקבוצתי נחסם, מושכים את המניה בנפרד דרך ה-chart endpoint
+                # אופציה ב' (גיבוי אבסולוטי): שליפה ישירה במקרה של חסימת ענן קבוצתית
                 if df_ticker.empty or not df_ticker.notna().any().any():
                     with open(os.devnull, 'w') as devnull:
                         with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
@@ -297,7 +281,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                 if df_ticker.empty:
                     continue
                 
-                # ניקוי וסינון ממוקד
                 df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
                 if len(df_ticker) < 14:
                     continue
@@ -388,7 +371,7 @@ with tab2:
     if st.session_state.radar_scanned and st.session_state.long_list:
         st.dataframe(pd.DataFrame(st.session_state.long_list), width="stretch")
     elif st.session_state.radar_scanned:
-        st.success("לאמצאו מניות העונות לתנאי הלונג כרגע.")
+        st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
         st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
