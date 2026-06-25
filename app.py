@@ -31,7 +31,7 @@ if GEMINI_API_KEY:
     except Exception:
         ai_client = None
 
-# פונקציה לייצור כותרות דפדפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
+# פונקציה לייצור כותרות דפנפן משתנות (User-Agent) לעקיפת חסימות קצב (Rate Limit)
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -179,7 +179,6 @@ st.markdown("""
 # כותרת האתר המרכזית המובילה
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
-# 🛠️ תיקון ארכיטקטוני 1: פירוק פסיקים, נקודה-פסיק ורווחים לקבלת רשימת סימולים נקייה לחלוטין
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
@@ -188,9 +187,7 @@ def load_tickers_from_file():
         return default_stocks
     with open(FILENAME, "r") as f:
         raw_content = f.read()
-        # החלפת פסיקים וסימני הפרדה ברווחים נקיים
         cleaned_content = raw_content.replace(",", " ").replace(";", " ").replace("\n", " ")
-        # יצירת רשימה מזוקקת של מניות ללא כפילויות או רווחים מיותרים
         return [token.strip().upper() for token in cleaned_content.split() if token.strip()]
 
 def calculate_rsi(prices, period=14):
@@ -217,7 +214,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
         tickers_str = " ".join(chunk)
         chunk_data = pd.DataFrame()
         
-        # ניסיונות הורדה קבוצתית מבוקרת
         for attempt in range(3):
             session.headers.update(get_random_headers())
             status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ יוצר ערוץ נתונים מאובטח... מעבד קבוצה {chunk_idx + 1} מתוך {len(chunks)}</span>", unsafe_allow_html=True)
@@ -225,7 +221,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                     try:
-                        # 🛠️ תיקון ארכיטקטוני 2: הוספת threads=False למניעת קפיצות והבהובי שגיאות על המסך
                         chunk_data = yf.download(
                             tickers_str, 
                             period="2mo", 
@@ -263,7 +258,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             df_ticker = pd.DataFrame()
             
             try:
-                # אופציה א': חילוץ מתוך הבלוק הקבוצתי
                 if not chunk_data.empty and chunk_data.notna().any().any():
                     if isinstance(chunk_data.columns, pd.MultiIndex):
                         if ticker in chunk_data.columns.levels[0]:
@@ -271,7 +265,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                     else:
                         df_ticker = chunk_data
                 
-                # אופציה ב' (גיבוי אבסולוטי): שליפה ישירה במקרה של חסימת ענן קבוצתית
                 if df_ticker.empty or not df_ticker.notna().any().any():
                     with open(os.devnull, 'w') as devnull:
                         with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
@@ -305,10 +298,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                     if is_today_green and is_yesterday_green:
                         temp_long.append({
                             "סימול": ticker, 
-                            "מחיר אחרון": f"${last_price:.2f}", 
-                            "מדד RSI": f"{rsi:.1f}", 
-                            "ממוצע נע 9": f"${ma9:.2f}", 
-                            "קריטריון סינון": "מומנטום לונג מאושר (מעל MA9 + RSI < 70 + נרות ירוקים + קולים דומיננטיים) 📈"
+                            "מחיר אחרון": f"${last_price:.2f}"
                         })
                 
                 # 📉 קריטריונים רדאר שורט סווינג
@@ -317,12 +307,9 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                     is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
                     
                     if is_today_negative and is_yesterday_negative:
-                        if rsi > 65: cond = "RSI גבוה קיצון (מתחת ל-MA9) + אופציות Put דומיננטיות 📉"
-                        elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) + סנטימנט Put חיובי 📉"
-                        else: cond = "מתחת ל-MA9 עם מחזור תומך + אופציות פוט דומיננטיות 📉"
-                        
                         temp_short.append({
-                            "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
+                            "סימול": ticker, 
+                            "מחיר אחרון": f"${last_price:.2f}"
                         })
             except:
                 continue
@@ -360,7 +347,17 @@ tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר ל�
 with tab1:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">רדאר מניות פוטנציאליות לשורט 📉</h2>', unsafe_allow_html=True)
     if st.session_state.radar_scanned and st.session_state.short_list:
-        st.dataframe(pd.DataFrame(st.session_state.short_list), width="stretch")
+        # 🛠️ תיקון 1 + 2: הצגת סימול ומחיר בלבד בעיצוב רשת קוביות פרימיום כהה עם הדגשה אדומה לשורט
+        cards_html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; direction: rtl;">'
+        for item in st.session_state.short_list:
+            cards_html += f"""
+            <div style="background: #0b111e; border: 1px solid rgba(239, 68, 68, 0.2); border-right: 5px solid #ef4444; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+                <div style="font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 900; color: #ffffff; letter-spacing: 1px;">{item['סימול']}</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #ef4444; margin-top: 8px;">{item['מחיר אחרון']}</div>
+            </div>
+            """
+        cards_html += '</div>'
+        st.markdown(cards_html, unsafe_allow_html=True)
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
     else:
@@ -369,7 +366,17 @@ with tab1:
 with tab2:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">📈 רדאר מניות פוטנציאליות ללונג</h2>', unsafe_allow_html=True)
     if st.session_state.radar_scanned and st.session_state.long_list:
-        st.dataframe(pd.DataFrame(st.session_state.long_list), width="stretch")
+        # 🛠️ תיקון 1 + 2: הצגת סימול ומחיר בלבד בעיצוב רשת קוביות פרימיום כהה עם הדגשה ירוקה ללונג
+        cards_html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; direction: rtl;">'
+        for item in st.session_state.long_list:
+            cards_html += f"""
+            <div style="background: #0b111e; border: 1px solid rgba(16, 185, 129, 0.2); border-right: 5px solid #10b981; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+                <div style="font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 900; color: #ffffff; letter-spacing: 1px;">{item['סימול']}</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #10b981; margin-top: 8px;">{item['מחיר אחרון']}</div>
+            </div>
+            """
+        cards_html += '</div>'
+        st.markdown(cards_html, unsafe_allow_html=True)
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
