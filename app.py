@@ -233,6 +233,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
         tickers_str = " ".join(chunk)
         chunk_data = pd.DataFrame()
         
+        # ניסיונות הורדה קבוצתית מבוקרת
         for attempt in range(3):
             session.headers.update(get_random_headers())
             status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ יוצר ערוץ נתונים מאובטח... מעבד קבוצה {chunk_idx + 1} מתוך {len(chunks)}</span>", unsafe_allow_html=True)
@@ -253,10 +254,12 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                     except:
                         chunk_data = pd.DataFrame()
             
-            if not chunk_data.empty:
+            # 🛠️ תיקון קריטי: מוודאים שחזר מידע מספרי אמיתי (ולא מטריצה של NaNs בגלל חסימת שרת)
+            if not chunk_data.empty and chunk_data.notna().any().any():
                 break
-            time.sleep(2.0)
+            time.sleep(1.5)
         
+        # עיבוד הנתונים של הקבוצה עם מנגנון הגנה דינמי למניה בודדת
         for ticker in chunk:
             total_processed += 1
             pct = int((total_processed / total_tickers) * 100)
@@ -268,28 +271,35 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                 remaining_time = avg_time_per_ticker * (total_tickers - total_processed)
                 time_display_str = f"כ-{int(remaining_time)} שניות" if remaining_time > 1 else "שניות בודדות"
             else:
-                remaining_time = 0.25 * (total_tickers - total_processed)
+                remaining_time = 0.35 * (total_tickers - total_processed)
                 time_display_str = f"כ-{int(remaining_time)} שניות"
                 
-            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 סריקת השוק בעיצומה... זמן נותר משוער לסיום: {time_display_str} ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
+            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 סורק מומנטום ואינדיקטורים: {ticker}... זמן נותר משוער: {time_display_str} ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
+            
+            df_ticker = pd.DataFrame()
             
             try:
-                # 🛠️ חילוץ בטוח של המניה מתוך ה-DataFrame הקבוצתי
-                if isinstance(chunk_data.columns, pd.MultiIndex):
-                    if ticker in chunk_data.columns.get_level_values(0):
-                        df_ticker = chunk_data[ticker]
+                # אופציה א': חילוץ מתוך הבלוק הקבוצתי שהורד בהצלחה
+                if not chunk_data.empty and chunk_data.notna().any().any():
+                    if isinstance(chunk_data.columns, pd.MultiIndex):
+                        if ticker in chunk_data.columns.levels[0]:
+                            df_ticker = chunk_data[ticker]
                     else:
-                        continue
-                else:
-                    df_ticker = chunk_data
+                        df_ticker = chunk_data
                 
-                if 'Close' not in df_ticker.columns or 'Open' not in df_ticker.columns:
+                # 🛠️ אופציה ב' (גיבוי אבסולוטי לחסינות ענן): אם הבלוק הקבוצתי נחסם, מושכים את המניה בנפרד דרך ה-chart endpoint
+                if df_ticker.empty or not df_ticker.notna().any().any():
+                    with open(os.devnull, 'w') as devnull:
+                        with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
+                            t = yf.Ticker(ticker, session=session)
+                            df_ticker = t.history(period="2mo", interval="1d", auto_adjust=False, actions=False)
+                
+                if df_ticker.empty:
                     continue
                 
-                # 🛠️ תיקון קריטי: מנקים NaNs אך ורק מטורי המחיר החיוניים ולא מוחקים שורות שלמות בגלל אינדיקטורים צדדיים
+                # ניקוי וסינון ממוקד
                 df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
-                
-                if df_ticker.empty or len(df_ticker) < 14:
+                if len(df_ticker) < 14:
                     continue
                 
                 close_prices = df_ticker['Close']
@@ -299,7 +309,6 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                 ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                 rsi = calculate_rsi(close_prices)
                 
-                # חילוץ נפח מסחר עם Fallback בטוח
                 if 'Volume' in df_ticker.columns and not pd.isna(df_ticker['Volume'].iloc[-1]):
                     volume = int(df_ticker['Volume'].iloc[-1])
                 else:
@@ -319,7 +328,7 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                             "קריטריון סינון": "מומנטום לונג מאושר (מעל MA9 + RSI < 70 + נרות ירוקים + קולים דומיננטיים) 📈"
                         })
                 
-                # 📉 קריטריונים רדאר שורט סווינג 
+                # 📉 קריטריונים רדאר שורט סווינג
                 elif last_price < ma9 and rsi > 30 and volume > 1000000:
                     is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
                     is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
@@ -379,7 +388,7 @@ with tab2:
     if st.session_state.radar_scanned and st.session_state.long_list:
         st.dataframe(pd.DataFrame(st.session_state.long_list), width="stretch")
     elif st.session_state.radar_scanned:
-        st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
+        st.success("לאמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
         st.info("אנא לחץ על כפתור 'התחל סריקת שוק' בתחתית העמוד כדי להפעיל את הראדאר.")
 
