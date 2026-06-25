@@ -38,7 +38,7 @@ def get_random_headers():
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/536.34'
     ]
     return {'User-Agent': random.choice(user_agents)}
 
@@ -95,6 +95,7 @@ st.markdown("""
         color: #ffffff;
         text-align: center !important;
         margin-top: 25px;
+        margin-bottom: 30px;
         text-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
     }
     
@@ -196,6 +197,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# 🛠️ תיקון 1: החזרת כותרת האתר המרכזית והמעוצבת לחלק העליון ביותר של המסך!
+st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
+
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
@@ -225,27 +229,32 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
     
     for chunk in chunks:
         tickers_str = " ".join(chunk)
+        chunk_data = pd.DataFrame()
         
-        # 🛠️ רענון והחלפת ה-User-Agent באופן דינמי לפני כל Chunk למניעת Rate Limit
-        session.headers.update(get_random_headers())
-        
-        status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ פונה לשרת להורדת חבילת מניות: {tickers_str}...</span>", unsafe_allow_html=True)
-        
-        with open(os.devnull, 'w') as devnull:
-            with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
-                try:
-                    chunk_data = yf.download(
-                        tickers_str, 
-                        period="2mo", 
-                        interval="1d", 
-                        group_by='ticker', 
-                        auto_adjust=False, 
-                        progress=False, 
-                        ignore_tz=True,
-                        session=session
-                    )
-                except:
-                    chunk_data = pd.DataFrame()
+        # 🛠️ תיקון 2: מנגנון הגנת קצב אגרסיבי (3 ניסיונות לחבילה עם רענון זהויות דפדפן והשהיית בטחון)
+        for attempt in range(3):
+            session.headers.update(get_random_headers())
+            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מתחבר לערוץ נתונים מאובטח (ניסיון {attempt+1}/3): {tickers_str}...</span>", unsafe_allow_html=True)
+            
+            with open(os.devnull, 'w') as devnull:
+                with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
+                    try:
+                        chunk_data = yf.download(
+                            tickers_str, 
+                            period="2mo", 
+                            interval="1d", 
+                            group_by='ticker', 
+                            auto_adjust=False, 
+                            progress=False, 
+                            ignore_tz=True,
+                            session=session
+                        )
+                    except:
+                        chunk_data = pd.DataFrame()
+            
+            if not chunk_data.empty:
+                break
+            time.sleep(2.0) # השהיית ביטחון קלה במקרה של סירוב שרת לפני ניסיון חוזר
         
         for ticker in chunk:
             total_processed += 1
@@ -254,48 +263,46 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 מנתח אינדיקטורים ומבנה מומנטום: {ticker}... ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
             
             try:
-                if isinstance(chunk_data.columns, pd.MultiIndex):
-                    if ticker in chunk_data.columns.get_level_values(0):
-                        df_ticker = chunk_data[ticker]
+                if not chunk_data.empty:
+                    if isinstance(chunk_data.columns, pd.MultiIndex):
+                        if ticker in chunk_data.columns.levels[0]:
+                            df_ticker = chunk_data[ticker].dropna()
+                        else:
+                            continue
                     else:
-                        continue
-                else:
-                    df_ticker = chunk_data
-                
-                df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
-                
-                if not df_ticker.empty and len(df_ticker) >= 14:
-                    close_prices = df_ticker['Close'].squeeze()
-                    open_prices = df_ticker['Open'].squeeze()
+                        df_ticker = chunk_data.dropna()
                     
-                    last_price = float(close_prices.iloc[-1])
-                    ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
-                    rsi = calculate_rsi(close_prices)
-                    volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
-                    
-                    # 📈 תנאי רדאר לונג
-                    if last_price > ma9 and rsi > 45 and volume > 1000000:
-                        temp_long.append({
-                            "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
-                        })
-                    
-                    # 📉 תנאי רדאר שורט סווינג
-                    elif last_price < ma9 and volume > 1000000:
-                        if rsi > 30:
-                            is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
-                            is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
-                            
-                            if is_today_negative and is_yesterday_negative:
-                                if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
-                                elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
-                                else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                    if not df_ticker.empty and len(df_ticker) >= 14:
+                        close_prices = df_ticker['Close'].squeeze()
+                        open_prices = df_ticker['Open'].squeeze()
+                        
+                        last_price = float(close_prices.iloc[-1])
+                        ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                        rsi = calculate_rsi(close_prices)
+                        volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
+                        
+                        # 📈 תנאי רדאר לונג
+                        if last_price > ma9 and rsi > 45 and volume > 1000000:
+                            temp_long.append({
+                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
+                            })
+                        
+                        # 📉 תנאי רדאר שורט סווינג המעודכן
+                        elif last_price < ma9 and volume > 1000000:
+                            if rsi > 30:
+                                is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
+                                is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
                                 
-                                temp_short.append({
-                                    "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
-                                })
+                                if is_today_negative and is_yesterday_negative:
+                                    if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
+                                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
+                                    else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                                    
+                                    temp_short.append({
+                                        "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
+                                    })
             except:
                 continue
-        # 🛠️ הגדלת זמן ההמתנה ל-1.0 שניה להגנה מקסימלית מחסימות שרת
         time.sleep(1.0)
     return temp_short, temp_long
 
@@ -330,7 +337,6 @@ tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר ל�
 with tab1:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">רדאר מניות פוטנציאליות לשורט 📉</h2>', unsafe_allow_html=True)
     if st.session_state.radar_scanned and st.session_state.short_list:
-        # 🛠️ עדכון סינטקס רוחב עדכני למניעת אזהרות לוג
         st.dataframe(pd.DataFrame(st.session_state.short_list), width="stretch")
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
@@ -340,7 +346,6 @@ with tab1:
 with tab2:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">📈 רדאר מניות פוטנציאליות ללונג</h2>', unsafe_allow_html=True)
     if st.session_state.radar_scanned and st.session_state.long_list:
-        # 🛠️ עדכון סינטקס רוחב עדכני למניעת אזהרות לוג
         st.dataframe(pd.DataFrame(st.session_state.long_list), width="stretch")
     elif st.session_state.radar_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
