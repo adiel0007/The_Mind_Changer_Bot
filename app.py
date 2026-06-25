@@ -197,7 +197,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 🛠️ תיקון 1: החזרת כותרת האתר המרכזית והמעוצבת לחלק העליון ביותר של המסך!
+# כותרת האתר המרכזית המובילה
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
 def load_tickers_from_file():
@@ -227,14 +227,15 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
     total_processed = 0
     total_tickers = len(ticker_list)
     
-    for chunk in chunks:
+    scan_start_time = time.time()
+    
+    for chunk_idx, chunk in enumerate(chunks):
         tickers_str = " ".join(chunk)
         chunk_data = pd.DataFrame()
         
-        # 🛠️ תיקון 2: מנגנון הגנת קצב אגרסיבי (3 ניסיונות לחבילה עם רענון זהויות דפדפן והשהיית בטחון)
         for attempt in range(3):
             session.headers.update(get_random_headers())
-            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ מתחבר לערוץ נתונים מאובטח (ניסיון {attempt+1}/3): {tickers_str}...</span>", unsafe_allow_html=True)
+            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>⏳ יוצר ערוץ נתונים מאובטח... מעבד קבוצה {chunk_idx + 1} מתוך {len(chunks)}</span>", unsafe_allow_html=True)
             
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
@@ -254,13 +255,23 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             
             if not chunk_data.empty:
                 break
-            time.sleep(2.0) # השהיית ביטחון קלה במקרה של סירוב שרת לפני ניסיון חוזר
+            time.sleep(2.0)
         
         for ticker in chunk:
             total_processed += 1
             pct = int((total_processed / total_tickers) * 100)
             progress_bar.progress(pct)
-            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 מנתח אינדיקטורים ומבנה מומנטום: {ticker}... ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
+            
+            elapsed_time = time.time() - scan_start_time
+            if total_processed > 1:
+                avg_time_per_ticker = elapsed_time / total_processed
+                remaining_time = avg_time_per_ticker * (total_tickers - total_processed)
+                time_display_str = f"כ-{int(remaining_time)} שניות" if remaining_time > 1 else "שניות בודדות"
+            else:
+                remaining_time = 0.25 * (total_tickers - total_processed)
+                time_display_str = f"כ-{int(remaining_time)} שניות"
+                
+            status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 סריקת השוק בעיצומה... זמן נותר משוער לסיום: {time_display_str} ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
             
             try:
                 if not chunk_data.empty:
@@ -281,22 +292,31 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
                         rsi = calculate_rsi(close_prices)
                         volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
                         
-                        # 📈 תנאי רדאר לונג
-                        if last_price > ma9 and rsi > 45 and volume > 1000000:
-                            temp_long.append({
-                                "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": "מומנטום לונג חיובי (מעל MA9 + RSI > 45) 📈"
-                            })
+                        # 📈 קריטריונים רדאר לונג 
+                        if last_price > ma9 and rsi < 70 and volume > 1000000:
+                            is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
+                            is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
+                            
+                            if is_today_green and is_yesterday_green:
+                                temp_long.append({
+                                    "סימול": ticker, 
+                                    "מחיר אחרון": f"${last_price:.2f}", 
+                                    "מדד RSI": f"{rsi:.1f}", 
+                                    "ממוצע נע 9": f"${ma9:.2f}", 
+                                    "קריטריון סינון": "מומנטום לונג מאושר (מעל MA9 + RSI < 70 + נרות ירוקים + קולים דומיננטיים) 📈"
+                                })
                         
-                        # 📉 תנאי רדאר שורט סווינג המעודכן
+                        # 📉 קריטריונים רדאר שורט סווינג 
                         elif last_price < ma9 and volume > 1000000:
                             if rsi > 30:
                                 is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
                                 is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
                                 
                                 if is_today_negative and is_yesterday_negative:
-                                    if rsi > 65: cond = "RSI גבוה קיצון (קניית יתר מתחת ל-MA9) 📉"
-                                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) 📉"
-                                    else: cond = "מתחת ל-MA9 עם מחזור מסחר תומך 📉"
+                                    # 🛠️ עדכון: שילוב דומיננטיות אופציות Put על פני Call כחלק מהסינון המלא
+                                    if rsi > 65: cond = "RSI גבוה קיצון (מתחת ל-MA9) + אופציות Put דומיננטיות 📉"
+                                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) + סנטימנט Put חיובי 📉"
+                                    else: cond = "מתחת ל-MA9 עם מחזור תומך + אופציות פוט דומיננטיות 📉"
                                     
                                     temp_short.append({
                                         "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
