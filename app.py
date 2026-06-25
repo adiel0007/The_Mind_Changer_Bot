@@ -274,53 +274,64 @@ def download_market_data_safely(ticker_list, status_container, progress_bar):
             status_container.markdown(f"<span style='color:#ffffff; font-weight:600;'>🔍 סריקת השוק בעיצומה... זמן נותר משוער לסיום: {time_display_str} ({total_processed}/{total_tickers})</span>", unsafe_allow_html=True)
             
             try:
-                if not chunk_data.empty:
-                    if isinstance(chunk_data.columns, pd.MultiIndex):
-                        if ticker in chunk_data.columns.levels[0]:
-                            df_ticker = chunk_data[ticker].dropna()
-                        else:
-                            continue
+                # 🛠️ חילוץ בטוח של המניה מתוך ה-DataFrame הקבוצתי
+                if isinstance(chunk_data.columns, pd.MultiIndex):
+                    if ticker in chunk_data.columns.get_level_values(0):
+                        df_ticker = chunk_data[ticker]
                     else:
-                        df_ticker = chunk_data.dropna()
+                        continue
+                else:
+                    df_ticker = chunk_data
+                
+                if 'Close' not in df_ticker.columns or 'Open' not in df_ticker.columns:
+                    continue
+                
+                # 🛠️ תיקון קריטי: מנקים NaNs אך ורק מטורי המחיר החיוניים ולא מוחקים שורות שלמות בגלל אינדיקטורים צדדיים
+                df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
+                
+                if df_ticker.empty or len(df_ticker) < 14:
+                    continue
+                
+                close_prices = df_ticker['Close']
+                open_prices = df_ticker['Open']
+                
+                last_price = float(close_prices.iloc[-1])
+                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                rsi = calculate_rsi(close_prices)
+                
+                # חילוץ נפח מסחר עם Fallback בטוח
+                if 'Volume' in df_ticker.columns and not pd.isna(df_ticker['Volume'].iloc[-1]):
+                    volume = int(df_ticker['Volume'].iloc[-1])
+                else:
+                    volume = 1500000
+                
+                # 📈 קריטריונים רדאר לונג
+                if last_price > ma9 and rsi < 70 and volume > 1000000:
+                    is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
+                    is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
                     
-                    if not df_ticker.empty and len(df_ticker) >= 14:
-                        close_prices = df_ticker['Close'].squeeze()
-                        open_prices = df_ticker['Open'].squeeze()
+                    if is_today_green and is_yesterday_green:
+                        temp_long.append({
+                            "סימול": ticker, 
+                            "מחיר אחרון": f"${last_price:.2f}", 
+                            "מדד RSI": f"{rsi:.1f}", 
+                            "ממוצע נע 9": f"${ma9:.2f}", 
+                            "קריטריון סינון": "מומנטום לונג מאושר (מעל MA9 + RSI < 70 + נרות ירוקים + קולים דומיננטיים) 📈"
+                        })
+                
+                # 📉 קריטריונים רדאר שורט סווינג 
+                elif last_price < ma9 and rsi > 30 and volume > 1000000:
+                    is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
+                    is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
+                    
+                    if is_today_negative and is_yesterday_negative:
+                        if rsi > 65: cond = "RSI גבוה קיצון (מתחת ל-MA9) + אופציות Put דומיננטיות 📉"
+                        elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) + סנטימנט Put חיובי 📉"
+                        else: cond = "מתחת ל-MA9 עם מחזור תומך + אופציות פוט דומיננטיות 📉"
                         
-                        last_price = float(close_prices.iloc[-1])
-                        ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
-                        rsi = calculate_rsi(close_prices)
-                        volume = int(df_ticker['Volume'].iloc[-1]) if 'Volume' in df_ticker.columns else 1500000
-                        
-                        # 📈 קריטריונים רדאר לונג 
-                        if last_price > ma9 and rsi < 70 and volume > 1000000:
-                            is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
-                            is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
-                            
-                            if is_today_green and is_yesterday_green:
-                                temp_long.append({
-                                    "סימול": ticker, 
-                                    "מחיר אחרון": f"${last_price:.2f}", 
-                                    "מדד RSI": f"{rsi:.1f}", 
-                                    "ממוצע נע 9": f"${ma9:.2f}", 
-                                    "קריטריון סינון": "מומנטום לונג מאושר (מעל MA9 + RSI < 70 + נרות ירוקים + קולים דומיננטיים) 📈"
-                                })
-                        
-                        # 📉 קריטריונים רדאר שורט סווינג 
-                        elif last_price < ma9 and volume > 1000000:
-                            if rsi > 30:
-                                is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
-                                is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
-                                
-                                if is_today_negative and is_yesterday_negative:
-                                    # 🛠️ עדכון: שילוב דומיננטיות אופציות Put על פני Call כחלק מהסינון המלא
-                                    if rsi > 65: cond = "RSI גבוה קיצון (מתחת ל-MA9) + אופציות Put דומיננטיות 📉"
-                                    elif rsi < 40: cond = "מומנטום שלילי חזק (שבירת מבנה) + סנטימנט Put חיובי 📉"
-                                    else: cond = "מתחת ל-MA9 עם מחזור תומך + אופציות פוט דומיננטיות 📉"
-                                    
-                                    temp_short.append({
-                                        "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
-                                    })
+                        temp_short.append({
+                            "סימול": ticker, "מחיר אחרון": f"${last_price:.2f}", "מדד RSI": f"{rsi:.1f}", "ממוצע נע 9": f"${ma9:.2f}", "קריטריון סינון": cond
+                        })
             except:
                 continue
         time.sleep(1.0)
