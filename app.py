@@ -180,7 +180,6 @@ st.markdown("""
 # כותרת האתר המרכזית המובילה
 st.markdown('<h1 class="main-title">The Mind Changer</h1>', unsafe_allow_html=True)
 
-# 🛠️ תיקון 1: מניעת כפילויות ברמת קובץ הטקסט באמצעות dict.fromkeys
 def load_tickers_from_file():
     if not os.path.exists(FILENAME):
         default_stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "NFLX", "META", "AMZN", "GOOG"]
@@ -223,9 +222,10 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
             with open(os.devnull, 'w') as devnull:
                 with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                     try:
+                        # 🛠️ שינוי קריטי: הגדלת תקופת ההורדה ל-1y לתמיכה בחישוב ממוצע 200
                         chunk_data = yf.download(
                             tickers_str, 
-                            period="2mo", 
+                            period="1y", 
                             interval="1d", 
                             group_by='ticker', 
                             auto_adjust=False, 
@@ -271,21 +271,27 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                     with open(os.devnull, 'w') as devnull:
                         with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
                             t = yf.Ticker(ticker, session=session)
-                            df_ticker = t.history(period="2mo", interval="1d", auto_adjust=False, actions=False)
+                            # 🛠️ שינוי קריטי: הגדלת תקופת ההורדה לגיבוי ל-1y לתמיכה בחישוב ממוצע 200
+                            df_ticker = t.history(period="1y", interval="1d", auto_adjust=False, actions=False)
                 
                 if df_ticker.empty:
                     continue
                 
                 df_ticker = df_ticker.dropna(subset=['Close', 'Open'])
-                if len(df_ticker) < 14:
+                # 🛠️ רף מינימום שונה ל-200 ימים כדי לאפשר חישוב ממוצע נע 200 בצורה תקינה
+                if len(df_ticker) < 200:
                     continue
                 
                 close_prices = df_ticker['Close']
                 open_prices = df_ticker['Open']
                 
                 last_price = float(close_prices.iloc[-1])
-                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
                 rsi = calculate_rsi(close_prices)
+                
+                # 🛠️ חישוב שלושת הממוצעים הנעים
+                ma9 = float(close_prices.rolling(window=9).mean().iloc[-1])
+                ma100 = float(close_prices.rolling(window=100).mean().iloc[-1])
+                ma200 = float(close_prices.rolling(window=200).mean().iloc[-1])
                 
                 if 'Volume' in df_ticker.columns and not pd.isna(df_ticker['Volume'].iloc[-1]):
                     volume = int(df_ticker['Volume'].iloc[-1])
@@ -294,25 +300,29 @@ def download_market_data_safely(ticker_list, status_container, progress_bar, mod
                 
                 # 📈 קריטריונים רדאר לונג
                 if mode == 'long' and last_price > ma9 and rsi < 70 and volume > 1000000:
-                    is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
-                    is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
+                    # 🛠️ תיקון 2: חוק הסינון החדש - אם המניה נסחרת בו-זמנית מעל 9, 100 ו-200, היא נחסמת ולא תופיע
+                    is_above_all_three = (last_price > ma9) and (last_price > ma100) and (last_price > ma200)
                     
-                    if is_today_green and is_yesterday_green:
-                        temp_results.append({
-                            "סימול": ticker, 
-                            "מחיר אחרון": f"${last_price:.2f}"
-                        })
+                    if not is_above_all_three:
+                        is_today_green = float(close_prices.iloc[-1]) > float(open_prices.iloc[-1])
+                        is_yesterday_green = float(close_prices.iloc[-2]) > float(open_prices.iloc[-2])
+                        
+                        # 🛠️ תיקון 1: נר סגירה אחרון חייב להיות גבוה מהיום שלפניו
+                        is_close_higher_than_yesterday = float(close_prices.iloc[-1]) > float(close_prices.iloc[-2])
+                        
+                        if is_today_green and is_yesterday_green and is_close_higher_than_yesterday:
+                            temp_results.append({
+                                "סימול": ticker, 
+                                "מחיר אחרון": f"${last_price:.2f}"
+                            })
                 
                 # 📉 קריטריונים רדאר שורט סווינג 
                 elif mode == 'short' and last_price < ma9 and rsi > 30 and volume > 1000000:
                     is_today_negative = float(close_prices.iloc[-1]) < float(open_prices.iloc[-1])
                     is_yesterday_negative = float(close_prices.iloc[-2]) < float(open_prices.iloc[-2])
-                    
-                    # בדיקה קשיחה שמחיר הסגירה האחרון נמוך ממחיר הסגירה של היום הקודם
                     is_close_lower_than_yesterday = float(close_prices.iloc[-1]) < float(close_prices.iloc[-2])
                     
                     if is_today_negative and is_yesterday_negative and is_close_lower_than_yesterday:
-                        # 🛠️ פילטר אופציות הפוך ומאובטח - חובת דומיננטיות פוטים על פני קולים (Put > Call)
                         seed_val = sum(ord(c) for c in ticker)
                         random.seed(seed_val)
                         more_puts_than_calls = random.random() > 0.45 
@@ -359,7 +369,7 @@ tab1, tab2, tab3 = st.tabs(["רדאר שורט סווינג 📉", "רדאר ל�
 with tab1:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">רדאר מניות פוטנציאליות לשורט 📉</h2>', unsafe_allow_html=True)
     
-    run_short_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום שורט", key="btn_short_radar")
+    run_short_radar = st.button("התחל סריקת שוק וזיהוי מומנטום שורט ⚡", key="btn_short_radar")
     
     if run_short_radar:
         st.session_state.short_list = []
@@ -382,13 +392,12 @@ with tab1:
     elif st.session_state.short_scanned:
         st.success("לא נמצאו מניות העונות לתנאי השורט כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק וזיהוי מומנטום שורט' כדי להפעיל את הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק וזיהוי מומנטום שורט' כדי להפעיל את הרדאר.")
 
 with tab2:
     st.markdown('<h2 style="text-align:center; color:#ffffff;">📈 רדאר מניות פוטנציאליות ללונג</h2>', unsafe_allow_html=True)
     
-    # 🛠️ תיקון 1ב': מחיקת הבלוק המשוכפל של run_short_radar שהיה כאן בטעות והריץ את השורט פעמיים
-    run_long_radar = st.button("⚡ התחל סריקת שוק וזיהוי מומנטום לונג", key="btn_long_radar")
+    run_long_radar = st.button("התחל סריקת שוק וזיהוי מומנטום לונג ⚡", key="btn_long_radar")
     
     if run_long_radar:
         st.session_state.long_list = []
@@ -411,7 +420,7 @@ with tab2:
     elif st.session_state.long_scanned:
         st.success("לא נמצאו מניות העונות לתנאי הלונג כרגע.")
     else:
-        st.info("אנא לחץ על כפתור 'התחל סריקת שוק וזיהוי מומנטום לונג' כדי להפעיל את הראדאר.")
+        st.info("אנא לחץ על כפתור 'התחל סריקת שוק וזיהוי מומנטום לונג' כדי להפעיל את הרדאר.")
 
 with tab3:
     st.markdown('<div class="center-header-block" style="text-align:center;"><h2>🤖 ניתוח מניה ומנוע שאלות AI</h2></div>', unsafe_allow_html=True)
@@ -428,7 +437,8 @@ with tab3:
     with col1:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
         search_ticker = st.text_input("הזן סימול מניה (למשל NFLX, AAPL):", key="search_input").upper().strip()
-        run_analysis = st.button("🔍 נתח מניה", key="btn_analyze")
+        
+        run_analysis = st.button("נתח מניה 🔍", key="btn_analyze")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if run_analysis and search_ticker:
@@ -444,12 +454,11 @@ with tab3:
             
             try:
                 t = yf.Ticker(search_ticker, session=session)
-                hist = t.history(period="1mo", auto_adjust=True)
+                hist = t.history(period="1y", auto_adjust=True)
                 if not hist.empty:
                     close_prices = hist['Close'].squeeze()
                     last_price = float(close_prices.iloc[-1])
                     
-                    # 🛠️ תיקון 2: הפיכת שורת האופציות למופע דינמי בהתאם למגמת המניה (שורט מול לונג)
                     if last_price > close_prices.rolling(window=9).mean().iloc[-1]:
                         ma_val = TEXT_DEFAULTS["ma_expensive"]
                         options_val = TEXT_DEFAULTS["options_calls"]
@@ -489,7 +498,8 @@ with tab3:
     with col2:
         st.markdown('<div class="search-section">', unsafe_allow_html=True)
         user_q = st.text_input("שאל את האנליסט AI שאלות פיננסיות חופשיות:", key="ask_input")
-        run_ai = st.button("🧠 שאל את האנליסט", key="btn_ai")
+        
+        run_ai = st.button("שאל את האנליסט 🧠", key="btn_ai")
         st.markdown('</div>', unsafe_allow_html=True)
         if run_ai and user_q:
             with st.spinner("ה-AI חושב..."):
