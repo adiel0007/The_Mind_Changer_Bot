@@ -9,6 +9,7 @@ import contextlib
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
+# הסתרת אלמנטים מובנים של המערכת לשמירה על מראה פרימיום נקי
 st.markdown("""
 <style>
 footer,header,div[data-testid="stStatusWidget"],
@@ -23,7 +24,7 @@ section[data-testid="stSidebar"]{display:none!important}
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════
-#  פונקציות נתונים
+#  פונקציות נתונים וסריקה
 # ═══════════════════════════════════════════════════════
 def get_session():
     agents = [
@@ -104,12 +105,14 @@ def do_scan(mode):
     tickers = load_tickers()
     results = []
     session = get_session()
+    
+    # אזור תצוגת התקדמות נייטיבי מעל ה-HTML
     progress = st.progress(0)
     status   = st.empty()
     total    = len(tickers)
 
     for i, ticker in enumerate(tickers):
-        status.markdown(f"<span style='color:#c9a84c;font-size:0.82rem;'>🔍 סורק {ticker}... ({i+1}/{total})</span>", unsafe_allow_html=True)
+        status.markdown(f"<p style='color:#c9a84c; font-size:0.95rem; margin-right:15px; direction:rtl;'>🔍 <b>סורק את מניית {ticker}...</b> ({i+1}/{total})</p>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
             t  = yf.Ticker(ticker, session=session)
@@ -185,72 +188,10 @@ def analyze_ticker(ticker):
     except:
         return None
 
-# ═══════════════════════════════════════════════════════
-#  Session state
-# ═══════════════════════════════════════════════════════
-for k in ["long_results","short_results","analysis","active_tab"]:
-    if k not in st.session_state:
-        st.session_state[k] = None
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = "long"
-
-# ═══════════════════════════════════════════════════════
-#  טעינת נתונים ראשוניים
-# ═══════════════════════════════════════════════════════
-with st.spinner("טוען נתוני שוק..."):
-    quotes  = fetch_quotes()
-    indices = fetch_indices()
-    stocks  = fetch_live_stocks()
-
-quotes_json  = json.dumps(quotes,  ensure_ascii=False)
-indices_json = json.dumps(indices, ensure_ascii=False)
-stocks_json  = json.dumps(stocks,  ensure_ascii=False)
-long_json    = json.dumps(st.session_state.long_results  or [], ensure_ascii=False)
-short_json   = json.dumps(st.session_state.short_results or [], ensure_ascii=False)
-analysis_json= json.dumps(st.session_state.analysis      or {}, ensure_ascii=False)
-active_tab   = st.session_state.active_tab or "long"
-
-# ═══════════════════════════════════════════════════════
-#  כפתורי Streamlit נסתרים — הטריגרים האמיתיים
-# ═══════════════════════════════════════════════════════
-col1,col2,col3,col4,col5 = st.columns(5)
-with col1:
-    if st.button("__SCAN_LONG__", key="scan_long"):
-        with st.spinner("סורק לונג..."):
-            st.session_state.long_results = do_scan("long")
-        st.session_state.active_tab = "long"
-        st.rerun()
-with col2:
-    if st.button("__SCAN_SHORT__", key="scan_short"):
-        with st.spinner("סורק שורט..."):
-            st.session_state.short_results = do_scan("short")
-        st.session_state.active_tab = "short"
-        st.rerun()
-with col3:
-    ticker_val = st.text_input("", key="ticker_hidden", label_visibility="collapsed")
-with col4:
-    if st.button("__ANALYZE__", key="analyze_btn"):
-        if st.session_state.ticker_hidden:
-            with st.spinner("מנתח..."):
-                st.session_state.analysis = analyze_ticker(st.session_state.ticker_hidden.upper())
-        st.session_state.active_tab = "ai"
-        st.rerun()
-with col5:
-    if st.button("__TAB__", key="tab_btn"):
-        st.rerun()
-
-# סתר את כל הכפתורים/inputs של Streamlit
-st.markdown("""
-<style>
-div[data-testid="stHorizontalBlock"]{display:none!important}
-</style>
-""", unsafe_allow_html=True)
-
-
 # ── פונקציות עזר לרינדור תוצאות מ-Python ──────────────────────
 def render_cards(data, mode):
     if data is None:
-        return '<div class="empty-msg">הפעל את הרדאר כדי לראות תוצאות</div>'
+        return '<div class="empty-msg">הפעל את הרדאר מלוח הבקרה למעלה כדי לראות תוצאות</div>'
     if len(data) == 0:
         return '<div class="empty-msg">לא נמצאו מניות העונות לקריטריונים כרגע</div>'
     cls   = "card-long"  if mode == "long"  else "card-short"
@@ -264,7 +205,7 @@ def render_cards(data, mode):
 
 def render_analysis(d):
     if not d:
-        return ''
+        return '<div class="empty-msg">הזן סימול בלוח הבקרה למעלה ולחץ על נתח מניה</div>'
     tag_cls = "tag-green" if d["up"] else "tag-red"
     return f"""
     <div class="result-card">
@@ -287,9 +228,59 @@ def render_analysis(d):
       </div>
     </div>"""
 
+# ═══════════════════════════════════════════════════════
+#  Session state
+# ═══════════════════════════════════════════════════════
+for k in ["long_results","short_results","analysis","active_tab"]:
+    if k not in st.session_state:
+        st.session_state[k] = None
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "long"
 
 # ═══════════════════════════════════════════════════════
-#  HTML
+#  לוח בקרה עליון (Native Streamlit Control Panel)
+# ═══════════════════════════════════════════════════════
+st.markdown("<p style='text-align: right; color: #c9a84c; font-weight: bold; margin-bottom: 5px; margin-right:15px; direction:rtl;'>🎛️ לוח בקרה ומפעיל מערכת:</p>", unsafe_allow_html=True)
+control_col1, control_col2, control_col3, control_col4 = st.columns([1.5, 1.5, 2, 1])
+
+with control_col1:
+    if st.button("⚡ הפעל רדאר לונג", key="btn_scan_long", use_container_width=True):
+        st.session_state.long_results = do_scan("long")
+        st.session_state.active_tab = "long"
+        st.rerun()
+
+with control_col2:
+    if st.button("⚡ הפעל רדאר שורט", key="btn_scan_short", use_container_width=True):
+        st.session_state.short_results = do_scan("short")
+        st.session_state.active_tab = "short"
+        st.rerun()
+
+with control_col3:
+    # הוספת ליבל תקין למניעת אזהרות נגישות (מוסתר ויזואלית בקוד האתר)
+    st.text_input("סימול מניה", key="ticker_hidden", placeholder="הזן סימול לניתוח (למשל AAPL)", label_visibility="collapsed")
+
+with control_col4:
+    if st.button("🤖 נתח מניה", key="btn_analyze", use_container_width=True):
+        if st.session_state.ticker_hidden:
+            st.session_state.analysis = analyze_ticker(st.session_state.ticker_hidden.upper())
+        st.session_state.active_tab = "ai"
+        st.rerun()
+
+# ═══════════════════════════════════════════════════════
+#  טעינת נתונים ראשוניים עבור ה-HTML
+# ═══════════════════════════════════════════════════════
+with st.spinner("טוען נתוני שוק..."):
+    quotes  = fetch_quotes()
+    indices = fetch_indices()
+    stocks  = fetch_live_stocks()
+
+quotes_json  = json.dumps(quotes,  ensure_ascii=False)
+indices_json = json.dumps(indices, ensure_ascii=False)
+stocks_json  = json.dumps(stocks,  ensure_ascii=False)
+active_tab   = st.session_state.active_tab or "long"
+
+# ═══════════════════════════════════════════════════════
+#  HTML & UI Layout
 # ═══════════════════════════════════════════════════════
 html = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -384,8 +375,8 @@ section{{position:relative;z-index:1}}
 .criteria-list li:last-child{{border-bottom:none}}
 .crit-dot{{width:5px;height:5px;border-radius:50%;flex-shrink:0}}
 .dot-green{{background:var(--green)}}.dot-red{{background:var(--red)}}
-.scan-btn{{width:100%;padding:11px;border-radius:3px;font-family:'Inter',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;border:none;transition:opacity .2s}}
-.scan-btn:hover{{opacity:.88}}.scan-btn:disabled{{opacity:.45;cursor:not-allowed}}
+.scan-btn{{width:100%;padding:11px;border-radius:3px;font-family:'Inter',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;border:none;transition:opacity .2s;text-align:center;text-decoration:none;display:block}}
+.scan-btn:hover{{opacity:.88}}
 .scan-green{{background:var(--green);color:#fff}}
 .scan-red{{background:var(--red);color:#fff}}
 .scan-gold{{background:var(--gold);color:#0a0a08}}
@@ -402,7 +393,7 @@ section{{position:relative;z-index:1}}
 .card-price-g{{font-size:0.74rem;font-weight:600;color:var(--green);margin-top:4px}}
 .card-price-r{{font-size:0.74rem;font-weight:600;color:var(--red);margin-top:4px}}
 .card-chg{{font-size:0.65rem;color:var(--muted);margin-top:2px}}
-.empty-msg{{color:var(--muted);font-size:0.82rem;text-align:center;padding:40px 0}}
+.empty-msg{{color:var(--muted);font-size:0.82rem;text-align:center;padding:40px 0;line-height:1.6}}
 
 .ai-grid{{display:grid;grid-template-columns:1fr 1fr;gap:20px}}
 .input-label{{font-size:0.68rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}}
@@ -514,7 +505,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
   <div class="section-wrap">
     <div class="section-eyebrow"><div class="eyebrow-line"></div><div class="eyebrow-text">Live Radar</div></div>
     <h2 class="section-title">רדאר המניות</h2>
-    <p class="section-desc">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>
+    <p class="section-desc">השתמש בלוח הבקרה של Streamlit בחלקו העליון של המסך כדי להפעיל סריקה בזמן אמת</p>
 
     <div class="tab-bar">
       <button class="tab-btn active" id="tbtn-long"  onclick="switchTab('long')">📈 רדאר לונג</button>
@@ -535,7 +526,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-green"></div>יומיים ירוקים רצופים</li>
             <li><div class="crit-dot dot-green"></div>סגירה גבוהה מאתמול</li>
           </ul>
-          <button class="scan-btn scan-green" onclick="triggerScan('long')">התחל סריקת לונג ⚡</button>
+          <div class="scan-btn scan-green" style="opacity: 0.85; cursor: default; text-align:center;">הפעל דרך לוח הבקרה למעלה ☝️</div>
         </div>
         <div class="results-panel">
           <div class="results-header">
@@ -560,7 +551,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-red"></div>סגירה נמוכה מאתמול</li>
             <li><div class="crit-dot dot-red"></div>Puts חזקים מ-Calls</li>
           </ul>
-          <button class="scan-btn scan-red" onclick="triggerScan('short')">התחל סריקת שורט ⚡</button>
+          <div class="scan-btn scan-red" style="opacity: 0.85; cursor: default; text-align:center;">הפעל דרך לוח הבקרה למעלה ☝️</div>
         </div>
         <div class="results-panel">
           <div class="results-header">
@@ -576,10 +567,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
       <div class="ai-grid">
         <div class="panel-card">
           <div class="panel-title">ניתוח מניה בודדת</div>
-          <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
-          <div class="input-label">סימול מניה</div>
-          <input class="ai-input" id="ticker-input" placeholder="AAPL, TSLA, NVDA..."/>
-          <button class="scan-btn scan-gold" onclick="triggerAnalyze()">נתח מניה</button>
+          <div class="panel-sub">הזן סימול בתיבה העליונה ולחץ "נתח מניה"</div>
           <div id="res-analyze">{render_analysis(st.session_state.analysis)}</div>
         </div>
         <div class="panel-card">
@@ -617,15 +605,15 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
     <h2 class="section-title">איך זה עובד?</h2>
     <p class="section-desc">שלושה שלבים פשוטים לתוצאות חכמות</p>
     <div class="steps-grid">
-      <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת. המערכת מתחילה לאסוף נתונים בזמן אמת.</div></div>
-      <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה.</div></div>
-      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגות עם מחיר ואחוז שינוי עדכניים.</div></div>
+      <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת בלוח הבקרה הראשי.</div></div>
+      <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה ומציג מד התקדמות מפורט.</div></div>
+      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוזרקות אוטומטית לתוך הגריד המעוצב של האתר.</div></div>
     </div>
   </div>
 </section>
 
 <footer>
-  <div><div class="footer-logo">The Mind Changer</div><div class="footer-copy">© 2025 — למטרות מידע בלבד. אינו ייעוץ השקעות.</div></div>
+  <div><div class="footer-logo">The Mind Changer</div><div class="footer-copy">© 2026 — למטרות מידע בלבד. אינו ייעוץ השקעות.</div></div>
   <div class="footer-links"><a onclick="goto('radar')">רדאר</a><a onclick="goto('features')">יתרונות</a><a onclick="goto('how')">תהליך</a></div>
 </footer>
 
@@ -663,44 +651,11 @@ function goto(id){{
 // ── טאבים ──
 function switchTab(n){{
   ['long','short','ai'].forEach(t=>{{
-    document.getElementById('tbtn-'+t).classList.toggle('active',t===n);
-    document.getElementById('tab-'+t).classList.toggle('active',t===n);
+    const btn = document.getElementById('tbtn-'+t);
+    const tab = document.getElementById('tab-'+t);
+    if(btn) btn.classList.toggle('active',t===n);
+    if(tab) tab.classList.toggle('active',t===n);
   }});
-}}
-
-// ── טריגר סריקה — לוחץ על כפתור Streamlit הנסתר ──
-function triggerScan(mode){{
-  const buttons = window.parent.document.querySelectorAll('button[kind="secondary"]');
-  const label   = mode==='long' ? '__SCAN_LONG__' : '__SCAN_SHORT__';
-  for(const btn of buttons){{
-    if(btn.innerText.trim()===label){{ btn.click(); break; }}
-  }}
-  document.getElementById('res-'+mode).innerHTML=
-    '<div class="empty-msg">⏳ הסריקה רצה בחלון Streamlit מעל... ממתין לתוצאות</div>';
-}}
-
-// ── טריגר ניתוח ──
-function triggerAnalyze(){{
-  const ticker = document.getElementById('ticker-input').value.trim().toUpperCase();
-  if(!ticker) return;
-  const inputs = window.parent.document.querySelectorAll('input[type="text"]');
-  for(const inp of inputs){{
-    const rect = inp.getBoundingClientRect();
-    if(rect.width===0 && rect.height===0){{
-      const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-      nativeInputSetter.call(inp, ticker);
-      inp.dispatchEvent(new Event('input', {{bubbles:true}}));
-      break;
-    }}
-  }}
-  setTimeout(()=>{{
-    const buttons = window.parent.document.querySelectorAll('button[kind="secondary"]');
-    for(const btn of buttons){{
-      if(btn.innerText.trim()==='__ANALYZE__'){{ btn.click(); break; }}
-    }}
-  }}, 300);
-  document.getElementById('res-analyze').innerHTML=
-    '<div class="empty-msg">⏳ מנתח נתונים אמיתיים...</div>';
 }}
 
 // ── שאלות ──
@@ -719,7 +674,6 @@ function answerQ(){{
   document.getElementById('res-ai').innerHTML=
     `<div class="ai-response-box" style="margin-top:12px"><div class="ai-response-label">תשובה</div><div class="ai-response-text">${{ans}}</div></div>`;
 }}
-document.getElementById('ticker-input').addEventListener('keydown',e=>{{if(e.key==='Enter')triggerAnalyze()}});
 document.getElementById('ai-q').addEventListener('keydown',e=>{{if(e.key==='Enter')answerQ()}});
 
 buildTape(); buildHero();
@@ -728,4 +682,4 @@ switchTab('{active_tab}');
 </body>
 </html>"""
 
-st.components.v1.html(html, height=900, scrolling=True)
+st.components.v1.html(html, height=880, scrolling=True)
