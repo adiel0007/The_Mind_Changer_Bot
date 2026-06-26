@@ -657,7 +657,7 @@ function buildHero(){{
   ).join('');
 }}
 
-function goto(id){document.getElementById(id).scrollIntoView({{behavior:'smooth'}});}
+function goto(id){{document.getElementById(id).scrollIntoView({{behavior:'smooth'}});}}
 
 function switchTab(n){{
   ['long','short','ai'].forEach(t=>{{
