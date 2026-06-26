@@ -287,20 +287,20 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .tape-sym{{color:var(--muted2)}}.tape-up{{color:var(--green)}}.tape-dn{{color:var(--red)}}.tape-sep{{color:var(--muted);font-size:0.65rem}}
 
 section{{position:relative;z-index:1}}
-#hero{{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:140px 56px 80px;gap:80px;position:relative;overflow:hidden}}
+#hero{{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:110px 40px 60px;gap:48px;position:relative;overflow:hidden}}
 .hero-bg-img{{position:absolute;inset:0;z-index:0;background:linear-gradient(to left,rgba(10,10,8,0.2) 0%,rgba(10,10,8,0.75) 45%,rgba(10,10,8,1) 75%),url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat}}
 .hero-left{{position:relative;z-index:1}}
 .hero-eyebrow{{display:flex;align-items:center;gap:10px;margin-bottom:24px}}
 .eyebrow-line{{width:32px;height:1px;background:var(--gold)}}
 .eyebrow-text{{font-size:0.72rem;font-weight:600;letter-spacing:0.16em;color:var(--gold);text-transform:uppercase}}
-.hero-title{{font-family:'Playfair Display',serif;font-size:clamp(3rem,5vw,5rem);font-weight:900;line-height:1.08;color:var(--text);margin-bottom:8px}}
+.hero-title{{font-family:'Playfair Display',serif;font-size:clamp(2rem,3.5vw,3.8rem);font-weight:900;line-height:1.08;color:var(--text);margin-bottom:8px}}
 .hero-title em{{font-style:italic;color:var(--gold)}}
 .hero-subtitle-line{{width:48px;height:2px;background:var(--gold);margin:24px 0}}
-.hero-desc{{font-size:1.05rem;color:var(--muted2);line-height:1.75;max-width:440px;margin-bottom:40px;font-weight:400}}
-.hero-btns{{display:flex;gap:12px;flex-wrap:wrap}}
-.btn-gold{{background:var(--gold);color:#0a0a08;font-weight:700;font-size:0.85rem;letter-spacing:0.08em;padding:14px 36px;border:none;border-radius:3px;cursor:pointer;text-transform:uppercase;transition:background .2s,transform .15s}}
+.hero-desc{{font-size:0.92rem;color:var(--muted2);line-height:1.65;max-width:420px;margin-bottom:28px;font-weight:400}}
+.hero-btns{{display:flex;gap:10px;flex-wrap:wrap}}
+.btn-gold{{background:var(--gold);color:#0a0a08;font-weight:700;font-size:0.8rem;letter-spacing:0.08em;padding:11px 28px;border:none;border-radius:3px;cursor:pointer;text-transform:uppercase;transition:background .2s,transform .15s}}
 .btn-gold:hover{{background:var(--gold-light);transform:translateY(-1px)}}
-.btn-outline{{background:transparent;color:var(--text);font-weight:600;font-size:0.85rem;letter-spacing:0.06em;padding:14px 32px;border:1px solid var(--border2);border-radius:3px;cursor:pointer;text-transform:uppercase;transition:border-color .2s}}
+.btn-outline{{background:transparent;color:var(--text);font-weight:600;font-size:0.8rem;letter-spacing:0.06em;padding:11px 24px;border:1px solid var(--border2);border-radius:3px;cursor:pointer;text-transform:uppercase;transition:border-color .2s}}
 .btn-outline:hover{{border-color:rgba(201,168,76,0.35)}}
 .hero-right{{position:relative;z-index:1}}
 .live-card{{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:28px}}
@@ -799,4 +799,4 @@ buildHero();
 </html>
 """
 
-st.components.v1.html(html, height=6000, scrolling=True)
+st.components.v1.html(html, height=900, scrolling=True)
