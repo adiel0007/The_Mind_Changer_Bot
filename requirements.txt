@@ -4,8 +4,3 @@ pandas
 numpy
 requests
 google-genai
-contextlib
-os
-random
-json
-
