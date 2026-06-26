@@ -9,22 +9,74 @@ import contextlib
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
-# הסתרת אלמנטים מובנים של המערכת לשמירה על מראה פרימיום נקי
+# ═══════════════════════════════════════════════════════
+#  הזרקת קוד CSS מותאם אישית לעיצוב חלון האב (Streamlit)
+# ═══════════════════════════════════════════════════════
 st.markdown("""
 <style>
-footer,header,div[data-testid="stStatusWidget"],
-.stAppDeployButton,div[data-testid="stToolbar"],
-div[data-testid="stDecoration"],#MainMenu,
-div[data-testid="stSidebarNav"],
-div[data-testid="collapsedControl"],
-section[data-testid="stSidebar"]{display:none!important}
-.main .block-container{padding:0!important;max-width:100%!important}
-.stApp{margin:0!important;padding:0!important}
+/* צביעת כל האפליקציה ברקע השחור של האתר */
+.stApp {
+    background-color: #0a0a08 !important;
+    color: #f0ede6 !important;
+}
+
+/* עיצוב שורת לוח הבקרה העליון */
+div[data-testid="stHorizontalBlock"] {
+    background-color: #141410 !important;
+    border: 1px solid rgba(201, 168, 76, 0.15) !important;
+    padding: 15px 25px !important;
+    border-radius: 4px !important;
+    margin: 10px 15px 20px 15px !important;
+}
+
+/* עיצוב פרימיום זהב לכפתורי המערכת */
+div[data-testid="stButton"] button {
+    background-color: #141410 !important;
+    color: #c9a84c !important;
+    border: 1px solid rgba(201, 168, 76, 0.3) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 600 !important;
+    border-radius: 3px !important;
+    height: 40px !important;
+    transition: all 0.2s ease !important;
+}
+div[data-testid="stButton"] button:hover {
+    background-color: #c9a84c !important;
+    color: #0a0a08 !important;
+    border-color: #c9a84c !important;
+}
+
+/* עיצוב שדה הזנת המניה */
+div[data-testid="stTextInput"] input {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(201, 168, 76, 0.15) !important;
+    color: #f0ede6 !important;
+    border-radius: 3px !important;
+    height: 40px !important;
+    direction: rtl !important;
+}
+div[data-testid="stTextInput"] input:focus {
+    border-color: #c9a84c !important;
+    box-shadow: none !important;
+}
+
+/* עיצוב מד ההתקדמות (Progress Bar) לצבע זהב */
+div[data-testid="stProgress"] div div {
+    background-color: #c9a84c !important;
+}
+
+/* הסתרת אלמנטים מובנים של Streamlit */
+footer, header, div[data-testid="stStatusWidget"],
+.stAppDeployButton, div[data-testid="stToolbar"],
+div[data-testid="stDecoration"], #MainMenu,
+div[data-testid="stSidebarNav"], div[data-testid="collapsedControl"],
+section[data-testid="stSidebar"] { display: none !important; }
+.main .block-container { padding: 0 !important; max-width: 100% !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════
-#  פונקציות נתונים וסריקה
+#  פונקציות נתונים
 # ═══════════════════════════════════════════════════════
 def get_session():
     agents = [
@@ -105,14 +157,12 @@ def do_scan(mode):
     tickers = load_tickers()
     results = []
     session = get_session()
-    
-    # אזור תצוגת התקדמות נייטיבי מעל ה-HTML
     progress = st.progress(0)
     status   = st.empty()
     total    = len(tickers)
 
     for i, ticker in enumerate(tickers):
-        status.markdown(f"<p style='color:#c9a84c; font-size:0.95rem; margin-right:15px; direction:rtl;'>🔍 <b>סורק את מניית {ticker}...</b> ({i+1}/{total})</p>", unsafe_allow_html=True)
+        status.markdown(f"<p style='color:#c9a84c; font-size:0.92rem; margin-right:15px; direction:rtl;'>🔍 <b>סורק את מניית {ticker}...</b> ({i+1}/{total})</p>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
             t  = yf.Ticker(ticker, session=session)
@@ -191,7 +241,7 @@ def analyze_ticker(ticker):
 # ── פונקציות עזר לרינדור תוצאות מ-Python ──────────────────────
 def render_cards(data, mode):
     if data is None:
-        return '<div class="empty-msg">הפעל את הרדאר מלוח הבקרה למעלה כדי לראות תוצאות</div>'
+        return '<div class="empty-msg">הפעל את הרדאר מלוח הבקרה העליון כדי להתחיל בסריקה</div>'
     if len(data) == 0:
         return '<div class="empty-msg">לא נמצאו מניות העונות לקריטריונים כרגע</div>'
     cls   = "card-long"  if mode == "long"  else "card-short"
@@ -205,7 +255,7 @@ def render_cards(data, mode):
 
 def render_analysis(d):
     if not d:
-        return '<div class="empty-msg">הזן סימול בלוח הבקרה למעלה ולחץ על נתח מניה</div>'
+        return '<div class="empty-msg">הזן סימול בלוח הבקרה העליון ולחץ על נתח מניה</div>'
     tag_cls = "tag-green" if d["up"] else "tag-red"
     return f"""
     <div class="result-card">
@@ -238,26 +288,25 @@ if "active_tab" not in st.session_state:
     st.session_state.active_tab = "long"
 
 # ═══════════════════════════════════════════════════════
-#  לוח בקרה עליון (Native Streamlit Control Panel)
+#  לוח בקרה עליון פרימיום משולב
 # ═══════════════════════════════════════════════════════
-st.markdown("<p style='text-align: right; color: #c9a84c; font-weight: bold; margin-bottom: 5px; margin-right:15px; direction:rtl;'>🎛️ לוח בקרה ומפעיל מערכת:</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: right; color: #c9a84c; font-weight: bold; margin-bottom: 5px; margin-right:15px; direction:rtl; font-family: sans-serif; font-size:0.85rem;'>🎛️ מערכת הפעלה ושליטה:</p>", unsafe_allow_html=True)
 control_col1, control_col2, control_col3, control_col4 = st.columns([1.5, 1.5, 2, 1])
 
 with control_col1:
-    if st.button("⚡ הפעל רדאר לונג", key="btn_scan_long", use_container_width=True):
+    if st.button("📈 הפעל רדאר לונג", key="btn_scan_long", use_container_width=True):
         st.session_state.long_results = do_scan("long")
         st.session_state.active_tab = "long"
         st.rerun()
 
 with control_col2:
-    if st.button("⚡ הפעל רדאר שורט", key="btn_scan_short", use_container_width=True):
+    if st.button("📉 הפעל רדאר שורט", key="btn_scan_short", use_container_width=True):
         st.session_state.short_results = do_scan("short")
         st.session_state.active_tab = "short"
         st.rerun()
 
 with control_col3:
-    # הוספת ליבל תקין למניעת אזהרות נגישות (מוסתר ויזואלית בקוד האתר)
-    st.text_input("סימול מניה", key="ticker_hidden", placeholder="הזן סימול לניתוח (למשל AAPL)", label_visibility="collapsed")
+    st.text_input("סימול מניה", key="ticker_hidden", placeholder="הזן סימול לניתוח (למשל: TSLA)", label_visibility="collapsed")
 
 with control_col4:
     if st.button("🤖 נתח מניה", key="btn_analyze", use_container_width=True):
@@ -280,7 +329,7 @@ stocks_json  = json.dumps(stocks,  ensure_ascii=False)
 active_tab   = st.session_state.active_tab or "long"
 
 # ═══════════════════════════════════════════════════════
-#  HTML & UI Layout
+#  ממשק ה-HTML המלא והמקורי
 # ═══════════════════════════════════════════════════════
 html = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -375,8 +424,7 @@ section{{position:relative;z-index:1}}
 .criteria-list li:last-child{{border-bottom:none}}
 .crit-dot{{width:5px;height:5px;border-radius:50%;flex-shrink:0}}
 .dot-green{{background:var(--green)}}.dot-red{{background:var(--red)}}
-.scan-btn{{width:100%;padding:11px;border-radius:3px;font-family:'Inter',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;border:none;transition:opacity .2s;text-align:center;text-decoration:none;display:block}}
-.scan-btn:hover{{opacity:.88}}
+.scan-btn{{width:100%;padding:11px;border-radius:3px;font-family:'Inter',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;border:none;text-align:center;text-decoration:none;display:block}}
 .scan-green{{background:var(--green);color:#fff}}
 .scan-red{{background:var(--red);color:#fff}}
 .scan-gold{{background:var(--gold);color:#0a0a08}}
@@ -505,7 +553,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
   <div class="section-wrap">
     <div class="section-eyebrow"><div class="eyebrow-line"></div><div class="eyebrow-text">Live Radar</div></div>
     <h2 class="section-title">רדאר המניות</h2>
-    <p class="section-desc">השתמש בלוח הבקרה של Streamlit בחלקו העליון של המסך כדי להפעיל סריקה בזמן אמת</p>
+    <p class="section-desc">השתמש בלוח השליטה המוזהב למעלה כדי להפעיל את הסורקים בזמן אמת</p>
 
     <div class="tab-bar">
       <button class="tab-btn active" id="tbtn-long"  onclick="switchTab('long')">📈 רדאר לונג</button>
@@ -526,7 +574,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-green"></div>יומיים ירוקים רצופים</li>
             <li><div class="crit-dot dot-green"></div>סגירה גבוהה מאתמול</li>
           </ul>
-          <div class="scan-btn scan-green" style="opacity: 0.85; cursor: default; text-align:center;">הפעל דרך לוח הבקרה למעלה ☝️</div>
+          <div class="scan-btn scan-green" style="opacity: 0.8; cursor: default;">הפעל דרך לוח הבקרה למעלה ☝️</div>
         </div>
         <div class="results-panel">
           <div class="results-header">
@@ -551,7 +599,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-red"></div>סגירה נמוכה מאתמול</li>
             <li><div class="crit-dot dot-red"></div>Puts חזקים מ-Calls</li>
           </ul>
-          <div class="scan-btn scan-red" style="opacity: 0.85; cursor: default; text-align:center;">הפעל דרך לוח הבקרה למעלה ☝️</div>
+          <div class="scan-btn scan-red" style="opacity: 0.8; cursor: default;">הפעל דרך לוח הבקרה למעלה ☝️</div>
         </div>
         <div class="results-panel">
           <div class="results-header">
@@ -605,7 +653,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
     <h2 class="section-title">איך זה עובד?</h2>
     <p class="section-desc">שלושה שלבים פשוטים לתוצאות חכמות</p>
     <div class="steps-grid">
-      <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת בלוח הבקרה הראשי.</div></div>
+      <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת בלוח הבקרה הראשי העליון.</div></div>
       <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה ומציג מד התקדמות מפורט.</div></div>
       <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוזרקות אוטומטית לתוך הגריד המעוצב של האתר.</div></div>
     </div>
@@ -661,7 +709,7 @@ function switchTab(n){{
 // ── שאלות ──
 const QA=[
   ['rsi','RSI מודד עוצמת מומנטום בסולם 0-100. מעל 70 — קנייה יתר, מתחת 30 — מכירת יתר.'],
-  ['ממוצע','ממוצע נע הוא ממוצע מחירי הסגירה על פני תקופה. MA9 רגיש, MA200 מגמה ראשית.'],
+  ['ממוצע','ממוצע נע הוא ממוצע מחירי הסגירה על פני תקופה. MA9 רגיש, MA200 מגמהראשית.'],
   ['פריצה','פריצה היא חציית התנגדות בנפח גבוה. תאושרה בשתי סגירות מעל ההתנגדות עם RSI 50-65.'],
   ['שורט','שורט = מכירה ללא בעלות, מתוך ציפייה לירידה. הרווח הוא הפרש בין מכירה לקנייה חזרה.'],
   ['לונג','לונג = קנייה רגילה מתוך ציפייה לעלייה. קונים בזול, מוכרים ביוקר.'],
