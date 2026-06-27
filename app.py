@@ -9,6 +9,7 @@ import contextlib
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
+# הזרקת הסטייל המקורי שלך והאזנה ללחיצות מתוך ה-Iframe
 st.markdown("""
 <style>
 footer,header,div[data-testid="stStatusWidget"],
@@ -20,6 +21,33 @@ section[data-testid="stSidebar"]{display:none!important}
 .main .block-container{padding:0!important;max-width:100%!important}
 .stApp{margin:0!important;padding:0!important}
 </style>
+
+<script>
+// האזנה להודעות שמגיעות מתוך רכיב ה-HTML (עוקף חסימות דפדפן במחשב ובנייד)
+window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'TRIGGER_CLICK') {
+        const buttons = window.parent.document.querySelectorAll('button[kind="secondary"]');
+        for (const btn of buttons) {
+            if (btn.innerText.trim() === event.data.label) {
+                btn.click();
+                break;
+            }
+        }
+    }
+    if (event.data && event.data.type === 'SET_INPUT') {
+        const inputs = window.parent.document.querySelectorAll('input[type="text"]');
+        for (const inp of inputs) {
+            const rect = inp.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) {
+                const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeInputSetter.call(inp, event.data.value);
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                break;
+            }
+        }
+    }
+});
+</script>
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════
@@ -185,48 +213,6 @@ def analyze_ticker(ticker):
     except:
         return None
 
-# ═══════════════════════════════════════════════════════
-#  Session state וניהול תור בקשות מהאתר
-# ═══════════════════════════════════════════════════════
-for k in ["long_results","short_results","analysis","active_tab","ticker_hidden"]:
-    if k not in st.session_state:
-        st.session_state[k] = None
-if "active_tab" not in st.session_state or st.session_state.active_tab is None:
-    st.session_state.active_tab = "long"
-
-# האזנה לטריגרים שמגיעים מה-HTML דרך ה-URL ומעבר מאובטח לשרת
-if "scan" in st.query_params:
-    mode = st.query_params["scan"]
-    st.query_params.clear()
-    if mode == "long":
-        st.session_state.long_results = do_scan("long")
-    else:
-        st.session_state.short_results = do_scan("short")
-    st.session_state.active_tab = mode
-    st.rerun()
-
-if "analyze" in st.query_params:
-    ticker = st.query_params["analyze"].upper()
-    st.query_params.clear()
-    st.session_state.ticker_hidden = ticker
-    st.session_state.analysis = analyze_ticker(ticker)
-    st.session_state.active_tab = "ai"
-    st.rerun()
-
-# ═══════════════════════════════════════════════════════
-#  טעינת נתונים ראשוניים
-# ═══════════════════════════════════════════════════════
-with st.spinner("טוען נתוני שוק..."):
-    quotes  = fetch_quotes()
-    indices = fetch_indices()
-    stocks  = fetch_live_stocks()
-
-quotes_json  = json.dumps(quotes,  ensure_ascii=False)
-indices_json = json.dumps(indices, ensure_ascii=False)
-stocks_json  = json.dumps(stocks,  ensure_ascii=False)
-active_tab   = st.session_state.active_tab or "long"
-
-
 # ── פונקציות עזר לרינדור תוצאות מ-Python ──────────────────────
 def render_cards(data, mode):
     if data is None:
@@ -267,6 +253,66 @@ def render_analysis(d):
       </div>
     </div>"""
 
+# ═══════════════════════════════════════════════════════
+#  Session state
+# ═══════════════════════════════════════════════════════
+for k in ["long_results","short_results","analysis","active_tab"]:
+    if k not in st.session_state:
+        st.session_state[k] = None
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "long"
+
+# ═══════════════════════════════════════════════════════
+#  טעינת נתונים ראשוניים
+# ═══════════════════════════════════════════════════════
+with st.spinner("טוען נתוני שוק..."):
+    quotes  = fetch_quotes()
+    indices = fetch_indices()
+    stocks  = fetch_live_stocks()
+
+quotes_json  = json.dumps(quotes,  ensure_ascii=False)
+indices_json = json.dumps(indices, ensure_ascii=False)
+stocks_json  = json.dumps(stocks,  ensure_ascii=False)
+long_json    = json.dumps(st.session_state.long_results  or [], ensure_ascii=False)
+short_json   = json.dumps(st.session_state.short_results or [], ensure_ascii=False)
+analysis_json= json.dumps(st.session_state.analysis      or {}, ensure_ascii=False)
+active_tab   = st.session_state.active_tab or "long"
+
+# ═══════════════════════════════════════════════════════
+#  כפתורי Streamlit נסתרים — הטריגרים האמיתיים
+# ═══════════════════════════════════════════════════════
+col1,col2,col3,col4,col5 = st.columns(5)
+with col1:
+    if st.button("__SCAN_LONG__", key="scan_long"):
+        with st.spinner("סורק לונג..."):
+            st.session_state.long_results = do_scan("long")
+        st.session_state.active_tab = "long"
+        st.rerun()
+with col2:
+    if st.button("__SCAN_SHORT__", key="scan_short"):
+        with st.spinner("סורק שורט..."):
+            st.session_state.short_results = do_scan("short")
+        st.session_state.active_tab = "short"
+        st.rerun()
+with col3:
+    ticker_val = st.text_input("ticker", key="ticker_hidden", label_visibility="collapsed")
+with col4:
+    if st.button("__ANALYZE__", key="analyze_btn"):
+        if st.session_state.ticker_hidden:
+            with st.spinner("מנתח..."):
+                st.session_state.analysis = analyze_ticker(st.session_state.ticker_hidden.upper())
+        st.session_state.active_tab = "ai"
+        st.rerun()
+with col5:
+    if st.button("__TAB__", key="tab_btn"):
+        st.rerun()
+
+# סתר את כל הכפתורים/inputs של Streamlit
+st.markdown("""
+<style>
+div[data-testid="stHorizontalBlock"]{display:none!important}
+</style>
+""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════
 #  HTML
@@ -504,8 +550,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='long' else ''}" id="tab-long">
       <div class="radar-layout">
-        <form method="get" target="_parent" class="panel-card">
-          <input type="hidden" name="scan" value="long"/>
+        <div class="panel-card">
           <div class="panel-title">רדאר לונג</div>
           <div class="panel-sub">מניות עם מומנטום עולה</div>
           <ul class="criteria-list">
@@ -516,8 +561,8 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-green"></div>יומיים ירוקים רצופים</li>
             <li><div class="crit-dot dot-green"></div>סגירה גבוהה מאתמול</li>
           </ul>
-          <button type="submit" class="scan-btn scan-green">התחל סריקת לונג ⚡</button>
-        </form>
+          <button class="scan-btn scan-green" onclick="triggerScan('long')">התחל סריקת לונג ⚡</button>
+        </div>
         <div class="results-panel">
           <div class="results-header">
             <div class="results-title">תוצאות סריקה</div>
@@ -530,8 +575,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='short' else ''}" id="tab-short">
       <div class="radar-layout">
-        <form method="get" target="_parent" class="panel-card">
-          <input type="hidden" name="scan" value="short"/>
+        <div class="panel-card">
           <div class="panel-title">רדאר שורט</div>
           <div class="panel-sub">מניות עם מומנטום יורד</div>
           <ul class="criteria-list">
@@ -542,8 +586,8 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-red"></div>סגירה נמוכה מאתמול</li>
             <li><div class="crit-dot dot-red"></div>Puts חזקים מ-Calls</li>
           </ul>
-          <button type="submit" class="scan-btn scan-red">התחל סריקת שורט ⚡</button>
-        </form>
+          <button class="scan-btn scan-red" onclick="triggerScan('short')">התחל סריקת שורט ⚡</button>
+        </div>
         <div class="results-panel">
           <div class="results-header">
             <div class="results-title">תוצאות סריקה</div>
@@ -556,14 +600,14 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='ai' else ''}" id="tab-ai">
       <div class="ai-grid">
-        <form method="get" target="_parent" class="panel-card">
+        <div class="panel-card">
           <div class="panel-title">ניתוח מניה בודדת</div>
           <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
           <div class="input-label">סימול מניה</div>
-          <input class="ai-input" id="ticker-input" name="analyze" placeholder="AAPL, TSLA, NVDA..." value="{st.session_state.ticker_hidden or ''}" required/>
-          <button type="submit" class="scan-btn scan-gold">נתח מניה</button>
+          <input class="ai-input" id="ticker-input" placeholder="AAPL, TSLA, NVDA..."/>
+          <button class="scan-btn scan-gold" onclick="triggerAnalyze()">נתח מניה</button>
           <div id="res-analyze">{render_analysis(st.session_state.analysis)}</div>
-        </form>
+        </div>
         <div class="panel-card">
           <div class="panel-title">שאלות כלליות</div>
           <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
@@ -585,7 +629,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
   </div>
   <div class="features-grid">
     <div class="feat-card"><span class="feat-icon">⚡</span><div class="feat-title">סריקה בזמן אמת</div><div class="feat-desc">מנתח מאות מניות לפי קריטריונים טכניים מוכחים</div></div>
-    <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה WITH RSI, ממוצעים נעים ונרות</div></div>
+    <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה עם RSI, ממוצעים נעים ונרות</div></div>
     <div class="feat-card"><span class="feat-icon">📉</span><div class="feat-title">רדאר שורט</div><div class="feat-desc">מאתר מניות חלשות עם Puts חזקים ומגמה יורדת</div></div>
     <div class="feat-card"><span class="feat-icon">📊</span><div class="feat-title">14 אינדיקטורים</div><div class="feat-desc">RSI, MA9/100/200, אופציות, המלצות אנליסטים ועוד</div></div>
     <div class="feat-card"><span class="feat-icon">🔒</span><div class="feat-title">נתונים מאובטחים</div><div class="feat-desc">עקיפת Rate Limits חכמה עם Session דינמי</div></div>
@@ -607,7 +651,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 </section>
 
 <footer>
-  <div><div class="footer-logo">The Mind Changer</div><div class="footer-copy">© 2026 — למטרות מידע בלבד. אינו ייעוץ השקעות.</div></div>
+  <div><div class="footer-logo">The Mind Changer</div><div class="footer-copy">© 2025 — למטרות מידע בלבד. אינו ייעוץ השקעות.</div></div>
   <div class="footer-links"><a onclick="goto('radar')">רדאר</a><a onclick="goto('features')">יתרונות</a><a onclick="goto('how')">תהליך</a></div>
 </footer>
 
@@ -645,11 +689,24 @@ function goto(id){{
 // ── טאבים ──
 function switchTab(n){{
   ['long','short','ai'].forEach(t=>{{
-    const btn = document.getElementById('tbtn-'+t);
-    const tab = document.getElementById('tab-'+t);
-    if(btn) btn.classList.toggle('active',t===n);
-    if(tab) tab.classList.toggle('active',t===n);
+    document.getElementById('tbtn-'+t).classList.toggle('active',t===n);
+    document.getElementById('tab-'+t).classList.toggle('active',t===n);
   }});
+}}
+
+// ── שידור הודעות מאובטח (עוקף חסימות CORS במחשב ובנייד באותו חלון) ──
+function triggerScan(mode){{
+  window.parent.postMessage({{ type: 'THE_MIND_CHANGER_SCAN', mode: mode }}, '*');
+  document.getElementById('res-'+mode).innerHTML=
+    '<div class="empty-msg">⏳ הסריקה רצה... ממתין לתוצאות</div>';
+}}
+
+function triggerAnalyze(){convertLine
+  const ticker = document.getElementById('ticker-input').value.trim().toUpperCase();
+  if(!ticker) return;
+  window.parent.postMessage({{ type: 'THE_MIND_CHANGER_ANALYZE', ticker: ticker }}, '*');
+  document.getElementById('res-analyze').innerHTML=
+    '<div class="empty-msg">⏳ מנתח נתונים אמיתיים...</div>';
 }}
 
 // ── שאלות ──
@@ -661,7 +718,7 @@ const QA=[
   ['לונג','לונג = קנייה רגילה מתוך ציפייה לעלייה. קונים בזול, מוכרים ביוקר.'],
   ['אופציות','Call = הימור על עלייה, Put = הימור על ירידה. Calls/Puts > 1 — פסימיות בשוק.'],
 ];
-function answerQ(){{
+function answerQ(){{{
   const q=document.getElementById('ai-q').value.trim().toLowerCase();
   const m=QA.find(([k])=>q.includes(k));
   const ans=m?m[1]:'נסה לשאול על: RSI, ממוצע נע, פריצה, שורט, לונג, אופציות.';
@@ -671,16 +728,45 @@ function answerQ(){{
 document.getElementById('ticker-input').addEventListener('keydown',e=>{{if(e.key==='Enter')triggerAnalyze()}});
 document.getElementById('ai-q').addEventListener('keydown',e=>{{if(e.key==='Enter')answerQ()}});
 
-// ── תיקון קשיח למחשבים וטאבלטים (מניעת פתיחת כרטיסייה חדשה) ──
-const appUrl = document.referrer.split('?')[0] || window.location.href.split('?')[0];
-document.querySelectorAll('form').forEach(form => {{
-    form.action = appUrl;
-}});
-
 buildTape(); buildHero();
 switchTab('{active_tab}');
 </script>
 </body>
 </html>"""
+
+# הוספת ה-Listener המרכזי של חלון האב בתוך הסטייל של השרת
+st.markdown("""
+<script>
+window.addEventListener('message', function(event) {
+    if (!event.data) return;
+    
+    // איתור שורת הקוד הנסתרת של השרת
+    const hiddenBlock = window.document.querySelector('div[data-testid="stHorizontalBlock"]');
+    if (!hiddenBlock) return;
+    
+    // ניתוב לחיצת סריקה
+    if (event.data.type === 'THE_MIND_CHANGER_SCAN') {
+        const label = event.data.mode === 'long' ? '__SCAN_LONG__' : '__SCAN_SHORT__';
+        const btn = Array.from(hiddenBlock.querySelectorAll('button')).find(b => b.innerText.trim() === label);
+        if (btn) btn.click();
+    }
+    
+    // ניתוב הזנת מניה וניתוח טכני
+    if (event.data.type === 'THE_MIND_CHANGER_ANALYZE') {
+        const targetInput = hiddenBlock.querySelector('input[type="text"]');
+        if (targetInput) {
+            const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeInputSetter.call(targetInput, event.data.ticker);
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            setTimeout(() => {
+                const btn = Array.from(hiddenBlock.querySelectorAll('button')).find(b => b.innerText.trim() === '__ANALYZE__');
+                if (btn) btn.click();
+            }, 300);
+        }
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 
 st.components.v1.html(html, height=900, scrolling=True)
