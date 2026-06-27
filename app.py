@@ -504,7 +504,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='long' else ''}" id="tab-long">
       <div class="radar-layout">
-        <form action="/" method="get" target="_top" class="panel-card">
+        <form method="get" target="_parent" class="panel-card">
           <input type="hidden" name="scan" value="long"/>
           <div class="panel-title">רדאר לונג</div>
           <div class="panel-sub">מניות עם מומנטום עולה</div>
@@ -530,7 +530,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='short' else ''}" id="tab-short">
       <div class="radar-layout">
-        <form action="/" method="get" target="_top" class="panel-card">
+        <form method="get" target="_parent" class="panel-card">
           <input type="hidden" name="scan" value="short"/>
           <div class="panel-title">רדאר שורט</div>
           <div class="panel-sub">מניות עם מומנטום יורד</div>
@@ -556,11 +556,11 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {'active' if active_tab=='ai' else ''}" id="tab-ai">
       <div class="ai-grid">
-        <form action="/" method="get" target="_top" class="panel-card">
+        <form method="get" target="_parent" class="panel-card">
           <div class="panel-title">ניתוח מניה בודדת</div>
           <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
           <div class="input-label">סימול מניה</div>
-          <input class="ai-input" name="analyze" placeholder="AAPL, TSLA, NVDA..." value="{st.session_state.ticker_hidden or ''}" required/>
+          <input class="ai-input" id="ticker-input" name="analyze" placeholder="AAPL, TSLA, NVDA..." value="{st.session_state.ticker_hidden or ''}" required/>
           <button type="submit" class="scan-btn scan-gold">נתח מניה</button>
           <div id="res-analyze">{render_analysis(st.session_state.analysis)}</div>
         </form>
@@ -585,7 +585,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
   </div>
   <div class="features-grid">
     <div class="feat-card"><span class="feat-icon">⚡</span><div class="feat-title">סריקה בזמן אמת</div><div class="feat-desc">מנתח מאות מניות לפי קריטריונים טכניים מוכחים</div></div>
-    <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה עם RSI, ממוצעים נעים ונרות</div></div>
+    <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה WITH RSI, ממוצעים נעים ונרות</div></div>
     <div class="feat-card"><span class="feat-icon">📉</span><div class="feat-title">רדאר שורט</div><div class="feat-desc">מאתר מניות חלשות עם Puts חזקים ומגמה יורדת</div></div>
     <div class="feat-card"><span class="feat-icon">📊</span><div class="feat-title">14 אינדיקטורים</div><div class="feat-desc">RSI, MA9/100/200, אופציות, המלצות אנליסטים ועוד</div></div>
     <div class="feat-card"><span class="feat-icon">🔒</span><div class="feat-title">נתונים מאובטחים</div><div class="feat-desc">עקיפת Rate Limits חכמה עם Session דינמי</div></div>
@@ -601,7 +601,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
     <div class="steps-grid">
       <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת. המערכת מתחילה לאסוף נתונים בזמן אמת.</div></div>
       <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה.</div></div>
-      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגותంతో מחיר ואחוז שינוי עדכניים.</div></div>
+      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגות עם מחיר ואחוז שינוי עדכניים.</div></div>
     </div>
   </div>
 </section>
@@ -652,10 +652,6 @@ function switchTab(n){{
   }});
 }}
 
-// ── פונקציות ריקות למניעת שגיאות הרצה ──
-function triggerScan(mode){{ }}
-function triggerAnalyze(){{ }}
-
 // ── שאלות ──
 const QA=[
   ['rsi','RSI מודד עוצמת מומנטום בסולם 0-100. מעל 70 — קנייה יתר, מתחת 30 — מכירת יתר.'],
@@ -672,7 +668,14 @@ function answerQ(){{
   document.getElementById('res-ai').innerHTML=
     `<div class="ai-response-box" style="margin-top:12px"><div class="ai-response-label">תשובה</div><div class="ai-response-text">${{ans}}</div></div>`;
 }}
+document.getElementById('ticker-input').addEventListener('keydown',e=>{{if(e.key==='Enter')triggerAnalyze()}});
 document.getElementById('ai-q').addEventListener('keydown',e=>{{if(e.key==='Enter')answerQ()}});
+
+// ── תיקון קשיח למחשבים וטאבלטים (מניעת פתיחת כרטיסייה חדשה) ──
+const appUrl = document.referrer.split('?')[0] || window.location.href.split('?')[0];
+document.querySelectorAll('form').forEach(form => {{
+    form.action = appUrl;
+}});
 
 buildTape(); buildHero();
 switchTab('{active_tab}');
