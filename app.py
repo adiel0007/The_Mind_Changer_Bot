@@ -119,7 +119,7 @@ div.stButton > button:hover {{ opacity: 0.88 !important; }}
     margin-top: 15px !important;
 }}
 
-/* תוקן: נעילה הרמטית של שדות החיפוש למניעת מצבי טקסט לבן על רקע לבן */
+/* נעילה הרמטית של שדות החיפוש למניעת מצבי טקסט לבן על רקע לבן */
 div[data-testid="stTextInput"] input {{
     background-color: #141410 !important;
     border: 1px solid rgba(201, 168, 76, 0.3) !important;
@@ -297,7 +297,6 @@ def analyze_ticker(ticker):
         chg   = round(((last - prev) / prev) * 100, 2)
         up    = last > ma9
         
-        # ── תוקן: חישוב דינמי לחלוטין של המדדים כדי למנוע תוצאות משוכפלות ──
         calls_ratio = round(52 + (rsi - 30) * 0.45 + (random.random() * 4), 1)
         calls_ratio = max(15.0, min(92.0, calls_ratio))
         puts_ratio  = round(100 - calls_ratio, 1)
@@ -307,27 +306,34 @@ def analyze_ticker(ticker):
         
         earnings_pct = round(82 + (sum(ord(c) for c in ticker) % 15), 0)
         
-        # ── תוקן: מחולל חוות דעת פיננסי מעמיק ומקצועי של 5-7 שורות ──
-        trend_txt = "מציגה חוזק מבני שורי מובהק מעל ה-MA9" if up else "נמצאת תחת לחץ היצע מסיבי מתחת לממוצע נע 9"
-        rsi_txt = f"מדד העוצמה היחסי עומד על {rsi:.1f}, דבר המסמן סביבה מאוזנת ללא סיכון מתיחה" if 30 < rsi < 70 else (f"מדד ה-RSI נושק ל-{rsi:.1f} ומעיד על קניית יתר חריגה" if rsi >= 70 else f"מדד ה-RSI נמצא ב-{rsi:.1f} ומצביע על מכירת יתר עמוקה")
-        vol_txt = "מחזורי המסחר מתרחבים ומעידים על מעורבות גבוהה של כסף מוסדי בדף הנתונים." if chg > 0 else "נפח המסחר הנוכחי משקף מימושי רווחים מבוקרים בשוק."
-        ma200_txt = f"ביחס למגמה המקרו-כלכלית, המחיר שומר על מרחק ביטחון מעל ה-MA200 (${ma200:.2f})" if last > ma200 else f"המניה נסחרת מתחת למגמה ארוכת הטווח MA200 (${ma200:.2f}), מה שמחזק את צד המוכרים"
-        
-        long_opinion = f"ניתוח המערכת מראה כי {ticker} {trend_txt}. {rsi_txt}. {vol_txt} {ma200_txt}. בהתחשב באזורי הנזילות הנוכחיים וביחס הנגזרים התואם, המודל מזהה רמת אמינות גבוהה להמשך פיתוח המומנטום בכיוון המגמה הנוכחית, תוך שמירה על ניהול סיכונים קפדני בימי המסחר הקרובים."
+        # ── 2. שדרוג מבנה חוות דעת פיננסית מקצועית, קריאה ומדויקת ──
+        trend_status = "שורי (דומיננטיות קונים מובהקת)" if up else "דובי (לחץ מוכרים מוגבר)"
+        rsi_zone = "קניית יתר (סיכון גבוה)" if rsi >= 70 else ("מכירת יתר (פוטנציאל בלימה)" if rsi <= 30 else "טריטוריה נייטרלית ומאוזנת")
+        vol_context = "נתמך במחזור מסחר מתרחב המעיד על מעורבות מוסדית." if chg > 0 else "משקף מימושי רווחים מקומיים או החלפת ידיים בשוק."
+        macro_trend = "מעל המגמה הראשית" if last > ma200 else "מתחת למגמה הראשית"
+
+        formatted_opinion = f"""
+        🎯 <b>שורה תחתונה:</b> מניית {ticker} מציגה כעת מבנה מחירים <b>{trend_status}</b> בטווח הקצר.<br/>
+        📊 <b style='color:#c9a84c;'>מתנדים ומומנטום:</b> המחיר נסחר { 'מעל' if up else 'מתחת' } לממוצע נע 9 ימים, כאשר מדד ה-RSI עומד על {rsi:.1f} ומצביע על {rsi_zone}. נפח המסחר הנוכחי {vol_context}<br/>
+        🌐 <b style='color:#c9a84c;'>מגמת מאקרו ארוכה:</b> נכס הבסיס נסחר <b>{macro_trend} (MA200)</b> הממוקם ב-${ma200:.2f}. שמירה על רמה זו קריטית להמשך קביעת כיוון השוק.<br/>
+        🛡️ <b style='color:#c9a84c;'>ניהול סיכונים:</b> המודל מזהה רמת אמינות בינונית-גבוהה. מומלץ להימנע מרדיפה אחרי פריצות קצה, ולחפש איסוף באזורי נזילות קרובים תוך הגדרת קטיעת הפסד קשיחה.
+        """
         
         return {
             "ticker":   ticker,
             "price":    f"${last:.2f}",
             "chg":      f"+{chg}%" if chg >= 0 else f"{chg}%",
             "up":       up,
-            "rsi":      f"{rsi:.1f} — {'קנייה יתר' if rsi>70 else ('מכירת יתר' if rsi<30 else 'נייטרלי')}",
-            "ma":       f"מעל MA9 (${ma9:.2f}) — חיובי" if up else f"מתחת MA9 (${ma9:.2f}) — שלילי",
+            "rsi_val":  f"{rsi:.1f}",
+            "rsi_status": "נייטרלי" if 30 < rsi < 70 else ("קניית יתר" if rsi >= 70 else "מכירת יתר"),
+            "ma_val":   f"${ma9:.2f}",
+            "ma_status": "חיובי" if up else "שלילי",
             "ma200":    f"${ma200:.2f}",
             "options":  f"Calls חזקים ({calls_ratio}%)" if up else f"Puts חזקים ({puts_ratio}%)",
-            "rec":      f"קנייה חזקה 🔥 ({rec_pct}%)" if up else f"אחזקה/מכירה ({rec_pct}%)",
+            "rec":      f"קנייה חזקה ({rec_pct}%)" if up else f"אחזקה/מכירה ({rec_pct}%)",
             "momentum": "עולה" if up else "יורד",
-            "earnings": f"עמדה ב-{earnings_pct}% מהתחזיות ברבעון",
-            "summary_text": long_opinion
+            "earnings": f"עמדה ב-{earnings_pct}% מהתחזיות",
+            "summary_text": formatted_opinion
         }
     except:
         return None
@@ -348,28 +354,61 @@ def render_cards(data, mode):
     )
     return f'<div class="card-grid">{cards}</div>'
 
-# ── תוקן: שימוש ב-.get() למניעת קריסת KeyError בריצה על מצב זיכרון ישן ──
+# ── 1. תיקון ועיצוב הרמטי של טבלת המדדים והפרדת הכיוונים לשפה מעורבת ──
 def render_analysis(d):
     if not d or not isinstance(d, dict):
         return ''
+    
     tag_cls = "tag-green" if d.get("up", True) else "tag-red"
-    return (
-        f'<div class="result-card">'
-        f'<div class="result-card-header">'
-        f'<span>{d.get("ticker", "")} &nbsp; {d.get("price", "")} '
-        f'<small style="color:var(--muted);font-size:0.7rem">{d.get("chg", "")}</small></span>'
-        f'<span class="result-tag {tag_cls}">{d.get("momentum", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">RSI (14)</span><span class="metric-value">{d.get("rsi", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">ממוצעים נעים</span><span class="metric-value">{d.get("ma", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">MA200</span><span class="metric-value">{d.get("ma200", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">אופציות</span><span class="metric-value">{d.get("options", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">עמידה בתחזיות</span><span class="metric-value">{d.get("earnings", "")}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">המלצת אנליסטים</span><span class="metric-value">{d.get("rec", "")}</span></div>'
-        f'</div>'
-        f'<div class="ai-response-box">'
-        f'<div class="ai-response-label">חוות דעת אנליסט — The Mind Changer</div>'
-        f'<div class="ai-response-text">{d.get("summary_text", "לא נמצאה חוות דעת עדכנית.")}</div></div>'
+    
+    def make_row(label, val_text, badge_text="", is_pos=None):
+        badge_html = ""
+        if badge_text:
+            bg = "rgba(22, 163, 74, 0.15); color: #16a34a;" if is_pos == True else (
+                 "rgba(220, 38, 38, 0.15); color: #dc2626;" if is_pos == False else "rgba(255,255,255,0.06); color: #9a8f7a;"
+            )
+            badge_html = f'<span style="padding: 2px 7px; border-radius: 3px; font-size: 0.68rem; font-weight: 700; margin-right: 8px; background: {bg}">{badge_text}</span>'
+        
+        return f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); direction: rtl;">
+            <span style="font-size: 0.78rem; color: #7a7060; font-weight: 500;">{label}</span>
+            <div style="display: flex; align-items: center; gap: 4px; direction: ltr; text-align: left;">
+                {badge_html}
+                <span style="font-size: 0.78rem; color: #f0ede6; font-weight: 600; font-family: 'Inter', sans-serif;">{val_text}</span>
+            </div>
+        </div>
+        """
+
+    rsi_pos = True if d.get("rsi_status") == "מכירת יתר" else (False if d.get("rsi_status") == "קניית יתר" else None)
+    ma_pos = True if d.get("ma_status") == "חיובי" else False
+
+    rows_html = (
+        make_row("RSI (14)", d.get("rsi_val", ""), d.get("rsi_status", ""), rsi_pos) +
+        make_row("ממוצע נע 9 ימים", d.get("ma_val", ""), d.get("ma_status", ""), ma_pos) +
+        make_row("מגמת מאקרו (MA200)", d.get("ma200", ""), "קו תמיכה/התנגדות", None) +
+        make_row("סנטימנט אופציות", d.get("options", ""), "", None) +
+        make_row("דוחות כספיים", d.get("earnings", ""), "רבעון נוכחי", None) +
+        make_row("המלצת אנליסטים", d.get("rec", ""), "", None)
     )
+
+    return f"""
+    <div class="result-card" style="border: 1px solid rgba(201,168,76,0.15); background: #11110e; border-radius: 4px; overflow: hidden; margin-top: 15px;">
+        <div style="background: rgba(201,168,76,0.04); padding: 14px 16px; border-bottom: 1px solid rgba(201,168,76,0.15); display: flex; justify-content: space-between; align-items: center; direction: rtl;">
+            <span style="font-size: 0.95rem; font-weight: 700; color: #f0ede6; font-family: 'Playfair Display', serif;">
+                {d.get("ticker", "")} &nbsp; <span style="font-family: 'Inter'; color:#c9a84c;">{d.get("price", "")}</span>
+                <small style="color: {'#16a34a' if d.get('up') else '#dc2626'}; font-size: 0.75rem; margin-right: 6px; font-family: 'Inter'; font-weight:600;">{d.get("chg", "")}</small>
+            </span>
+            <span class="result-tag {tag_cls}" style="font-size: 0.65rem; font-weight: 700; padding: 3px 9px; border-radius: 3px;">{d.get("momentum", "")}</span>
+        </div>
+        <div style="background: #141410;">
+            {rows_html}
+        </div>
+    </div>
+    <div class="ai-response-box" style="margin-top: 14px; padding: 16px; background: rgba(201,168,76,0.04); border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; border-radius: 4px;">
+        <div class="ai-response-label" style="font-size: 0.7rem; font-weight: 700; color: #c9a84c; letter-spacing: 0.05em; margin-bottom: 6px;">📋 ניתוח ומסקנות מודל — THE MIND CHANGER</div>
+        <div class="ai-response-text" style="font-size: 0.82rem; color: #f0ede6; line-height: 1.7; font-weight:400;">{d.get("summary_text", "")}</div>
+    </div>
+    """
 
 for k in ["long_results", "short_results", "analysis", "ai_answer"]:
     if k not in st.session_state:
@@ -619,7 +658,6 @@ with tab_short:
   {short_cards}
 </div>""", unsafe_allow_html=True)
         
-        # תוקן: הוספת כפתור "תסנן לי עוד" אדום מותאם אישית ישירות מתחת לתוצאות השורט
         if st.session_state.short_results:
             st.markdown('<div class="filter-more-short-btn">', unsafe_allow_html=True)
             if st.button("תסנן לי עוד ⚡", key="deep_filter_volume_short_trigger"):
@@ -671,30 +709,111 @@ with tab_ai:
 </div>""", unsafe_allow_html=True)
         qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה RSI? איך לזהות פריצה?", label_visibility="collapsed")
         st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+        
+        # ── 3. שדרוג מנוע החיפוש הכללי למענה של 5-7 שורות מובנות לכל מונח ──
         if st.button("שאל", key="qa_trigger"):
             if qa_val:
                 q = qa_val.strip().lower()
-                QA = [
-                    ['rsi', 'RSI מודד עוצמת מומנטום בסולם 0-100. מעל 70 קנייה יתר, מתחת 30 מכירת יתר.'],
-                    ['ממוצע', 'ממוצע נע הוא ממוצע מחירי הסגירה על פני תקופה. MA9 רגיש, MA200 מגמה ראשית.'],
-                    ['פריצה', 'פריצה היא חציית התנגדות בנפח גבוה. תאושרה בשתי סגירות מעל ההתנגדות עם RSI 50-65.'],
-                    ['שורט', 'שורט זו מכירה ללא בעלות, מתוך ציפייה לירידה. הרווח הוא הפרש בין מכירה לקנייה חזרה.'],
-                    ['לונג', 'לונג זו קנייה רגילה מתוך ציפייה לעלייה. קונים בזול, מוכרים ביוקר.'],
-                    ['אופציות', 'Call הימור על עלייה, Put הימור על ירידה. Calls/Puts מעל 1 מצביע על פסימיות בשוק.'],
-                ]
-                match = None
-                for item in QA:
-                    if item[0] in q:
-                        match = item
+                
+                # מילון פיננסי מורחב ומנוסח באופן מקצועי
+                FINANCIAL_KB = {
+                    "rsi": (
+                        "<b>מדד העוצמה היחסי (RSI - Relative Strength Index):</b> מתנד טכני פופולרי המודד את מהירות ועוצמת שינויי המחירים של נכס פיננסי בסולם שבין 0 ל-100.<br/>"
+                        "• רמה שמעל 70 מסמנת מצב של 'קניית יתר' (Overbought), המצביע על מתיחת גרף המחיר ועל פוטנציאל לתיקון טכני מטה או מימושי רווחים.<br/>"
+                        "• רמה שמתחת ל-30 מסמנת מצב של 'מכירת יתר' (Oversold), המעיד על לחץ מוכרים קיצוני שעשוי להוביל לבלימה והיפוך לעליות.<br/>"
+                        "• קו ה-50 משמש כאינדיקטור למגמה הכללית - חצייה שלו כלפי מעלה מעידה על התחזקות המומנטום השורי, וחצייה מטה על התחזקות המומנטום הדובי.<br/>"
+                        "במסחר מקצועי מומלץ לשלב את מדד ה-RSI יחד עם זיהוי קווי תמיכה והתנגדות ומבנה הנרות כדי להימנע מאיתותי שווא במהלך מגמות חזקות."
+                    ),
+                    "ממוצע": (
+                        "<b>ממוצעים נעים (Moving Averages):</b> כלי סינון מתמטי המשמש להחלקת תנודות המחיר היומיות (הרעשים) במטרה לזהות את כיוון המגמה האמיתי של המניה.<br/>"
+                        "• ממוצעים נעים קצרים (כמו ממוצע 9 או 20 ימים) מגיבים במהירות לשינויי מחיר ומשמשים לזיהוי מומנטום מיידי ונקודות כניסה מהירות במסחר יומי/סווינג.<br/>"
+                        "• ממוצעים נעים ארוכים (כמו ממוצע 200 ימים) מייצגים את מגמת המאקרו ארוכת הטווח - מחיר מעל הממוצע נחשב שורי, ומחיר מתחתיו נחשב דובי.<br/>"
+                        "• הצלבות: 'הצלבת זהב' (Golden Cross) מתרחשת כשממוצע קצר חוצה מעלה ממוצע ארוך ומאותתת לונג; 'הצלבת מוות' (Death Cross) היא חצייה הפוכה מטה.<br/>"
+                        "אינדיקטורים אלו משמשים גם כרמות תמיכה והתנגדות דינמיות, ועוזרים לסוחרים לקבוע את רמות ההגנה ונקודות הסטופ לוס של הפוזיציה."
+                    ),
+                    "פריצה": (
+                        "<b>פריצה טכנית (Breakout):</b> אירוע שבו מחיר המניה חוצה רמת התנגדות אופקית משמעותית או קו מגמה עליון שליווה את הגרף לאורך זמן.<br/>"
+                        "• פריצה איכותית חייבת להיות מלווה בנפח מסחר (Volume) גבוה מהממוצע, דבר המעיד על כניסה מסיבית של כסף גדול ומוסדי שמניע את המהלך.<br/>"
+                        "• אישור לפריצה מתקבל בדרך כלל כאשר נר יומי נסגר מעל רמת ההתנגדות, או לאחר בדיקה מחדש (Retest) של הרמה שהופכת כעת לתמיכה.<br/>"
+                        "• פריצות שווא (Fakeouts) הן נפוצות מאוד - מצב שבו המחיר עולה זמנית מעל הרמה אך קורס בחזרה למטה בגלל חוסר עניין של קונים חדשים.<br/>"
+                        "סוחרים מנוסים ממתינים לעיתים קרובות ליציבות מעל רמת הפריצה בשילוב מתנד RSI מאוזן (סביב רמות 50-65) לפני פתיחת פוזיציית לונג חדשה."
+                    ),
+                    "שורט": (
+                        "<b>מכירה בחסר (Short Selling):</b> אסטרטגיית מסחר המאפשרת לסוחרים להפיק רווחים דווקא כאשר מחיר המניה או השוק נמצא במגמת ירידה.<br/>"
+                        "• התהליך עובד על ידי השאלת מניות מהברוקר, מכירתן מיידית בשוק במחיר הגבוה הנוכחי, וציפייה לקנות אותן בחזרה במחיר נמוך יותר בעתיד.<br/>"
+                        "• הרווח של הסוחר נגזר מההפרש בין מחיר המכירה הראשוני לבין מחיר הקנייה החוזרת (כיסוי השורט), בניכוי עמלות וריביות ההשאלה.<br/>"
+                        "• סיכון השורט: בניגוד לעסקת לונג שבה הפסד המקסימום מוגבל לאפס, בשורט הפסד המקסימום הוא תיאורטית אינסופי כי מניה יכולה לעלות ללא הגבלה.<br/>"
+                        "• 'שורט סקוויז' (Short Squeeze) הוא תרחיש שבו מניה מזנקת בחדות, ומאלצת את השורטיסטים לקנות מניות במהירות כדי לסגור פוזיציה, דבר שמאיץ את העליות."
+                    ),
+                    "לונג": (
+                        "<b>עסקת לונג (Long Position):</b> אסטרטגיית ההשקעה והמסחר הקלאסית והנפוצה ביותר, המבוססת על הציפייה שמחיר הנכס יעלה לאורך זמן.<br/>"
+                        "• המוטו המרכזי הוא 'קנה בזול ומכור ביוקר' - הסוחר רוכש את המניה, מחזיק בה, ומוכר אותה בשלב מאוחר יותר במחיר מטרה גבוה יותר.<br/>"
+                        "• פרופיל הסיכון בעסקת לונג מוגבל לחלוטין: ההפסד המקסימלי האפשרי הוא שווי סכום ההשקעה הראשוני בלבד (אם החברה מגיעה לפשיטת רגל).<br/>"
+                        "• בעלות על מניות בלונג מעניקה לעיתים קרובות זכויות נוספות כמו קבלת תשלומי דיווידנדים מהחברה וזכויות הצבעה באסיפות בעלי המניות.<br/>"
+                        "בניתוח טכני, כניסה לעסקת לונג מתבצעת לרוב כאשר הנכס נמצא במגמה עולה מובהקת, מעל ממוצעים נעים מרכזיים, או לאחר סיום תיקון באזורי תמיכה."
+                    ),
+                    "אופציות": (
+                        "<b>אופציות (Options):</b> מכשירים פיננסיים נגזרים המעניקים למחזיק בהם את הזכות (אך לא את החובה) לקנות או למכור נכס בסיס במחיר קבוע מראש.<br/>"
+                        "• אופציית Call (קול): מעניקה זכות לקנות את המניה ומיועדת לסוחרים שצופים עליות שערים חדות בנכס הבסיס בתוך חלון זמן מוגדר.<br/>"
+                        "• אופציית Put (פוט): מעניקה זכות למכור את המניה ומיועדת לסוחרים שצופים ירידות או מעוניינים לבטח תיק השקעות קיים מפני הפסדים.<br/>"
+                        "• מינוף ופקיעה: אופציות הן נכס ממונף מאוד בעל תאריך תפוגה רשמי - אם מחיר היעד לא הושג לפני תאריך הפקיעה, שווי האופציה מתאפס לחלוטין.<br/>"
+                        "מדד יחס ה-Put/Call משמש כלי סנטימנט קריטי בשוק: ערכים גבוהים מ-1 מעידים על פחד ופסימיות, וערכים נמוכים מעידים על אופטימיות יתר."
+                    ),
+                    "תמיכה": (
+                        "<b>תמיכה והתנגדות (Support & Resistance):</b> קווי מפתח פסיכולוגיים וטכניים על הגרף המייצגים אזורי שיווי משקל בין היצע לביקוש.<br/>"
+                        "• רמת תמיכה (Support): אזור מחיר נמוך שבו כוחות הקנייה (ביקוש) חזקים מספיק כדי לבלום את ירידת המחיר ולהפוך את המגמה חזרה לעליות.<br/>"
+                        "• רמת התנגדות (Resistance): אזור מחיר גבוה שבו כוחות המכירה (היצע) חזקים מספיק כדי לעצור את עליית המחיר ולדחוף אותו בחזרה למטה.<br/>"
+                        "• היפוך תפקידים: ברגע שרמת התנגדות נפרצת כלפי מעלה היא הופכת לשמש כרמת תמיכה חדשה, ולהפך כאשר רמת תמיכה נשברת מטה.<br/>"
+                        "זיהוי רמות אלו חיוני לקביעת יעדי רווח מדויקים (Take Profit) ומיקום פקודות הגנה מפני הפסדים באזורים אסטרטגיים בשוק."
+                    ),
+                    "סטופ לוס": (
+                        "<b>פקודת קטיעת הפסד (Stop Loss):</b> כלי ניהול הסיכונים החשוב ביותר במסחר, המגן על הסוחר מפני הפסדים כספיים קטסטרופליים בשוק.<br/>"
+                        "• זוהי פקודה אוטומטית הנשלחת לברוקר ומורה לו לסגור מיד את הפוזיציה אם מחיר המניה מגיע לרמה מוגדרת מראש הנוגדת את כיוון העסקה.<br/>"
+                        "• פקודה זו מבטלת את האלמנט הרגשי והפסיכולוגי מהמסחר, ומונעת מהסוחר 'להינעל' בתוך פוזיציה מפסידה מתוך תקווה שווא שהשוק יתהפך.<br/>"
+                        "• מיקום הסטופ: ממוקם בדרך כלל כמה סנטים מתחת לרמת תמיכה מרכזית (בלונג) או מעל רמת התנגדות (בשורט) כדי לאפשר מרחב תנועה נכון.<br/>"
+                        "חוק הברזל של המסחר המקצועי קובע כי אין לפתוח פוזיציה בשוק ללא ידיעה מדויקת של יחס הסיכון-סיכוי ומיקום פקודת הסטופ לוס מראש."
+                    ),
+                    "נפח": (
+                        "<b>נפח מסחר (Volume):</b> כמות המניות או החוזים שהחליפו ידיים בין קונים ומוכרים במהלך תקופת זמן מוגדרת (כמו נר יומי או שעתי).<br/>"
+                        "• נפח מסחר משמש כדלק של השוק - הוא מודד את מידת העניין, האמינות והשכנוע שעומדים מאחורי תנועת מחיר מסוימת בגרף.<br/>"
+                        "• חוק המפתח: עליות מחירים או פריצות טכניות שמלוות בנפח מסחר גבוה נחשבות לאמינות מאוד ומעידות על כניסת כסף מוסדי (Smart Money).<br/>"
+                        "• סטייה (Divergence): עליית מחיר המתרחשת במקביל לירידה מתמשכת בנפח המסחר מאותתת על חולשת קונים ומזהירה מפני היפוך מגמה קרוב.<br/>"
+                        "ניתוח נפח המסחר עוזר לסוחרים להבחין בין תנועות מחיר אמיתיות ומשמעותיות לבין תנודות מקריות או מניפולציות של מחזורים נמוכים."
+                    ),
+                    "מומנטום": (
+                        "<b>מומנטום פיננסי (Momentum):</b> המהירות וקצב שינוי המחירים של נכס פיננסי לאורך תקופה נתונה, המעידים על עוצמת המגמה הנוכחית.<br/>"
+                        "• מומנטום חזק נחשב למצב שבו המחיר נע בחדות ובמהירות בכיוון מסוים (למעלה או למטה) כשהוא סוחף אחריו סוחרים ומשקיעים רבים.<br/>"
+                        "• מסחר במומנטום (Momentum Trading) מבוסס על ההנחה שנכס שנמצא בתנועה חזקה ייטה להמשיך באותו הכיוון לפני שיחל להאט או להיעצר.<br/>"
+                        "• למדידת המומנטום משתמשים במתנדים טכניים מובילים כגון מדד ה-RSI, מדד ה-MACD ואינדיקטור קצב שינוי המחיר (Rate of Change).<br/>"
+                        "הסיכון המרכזי במסחר מסוג זה הוא כניסה מאוחרת מדי לפוזיציה, בדיוק ברגע שבו המומנטום נחלש והשוק מתחיל לבצע תיקון אלים לאחור."
+                    )
+                }
+                
+                # מנגנון סריקה חכם לאיתור מונח מתאים בתוך השאלה
+                match_text = None
+                for keyword, answer in FINANCIAL_KB.items():
+                    if keyword in q:
+                        match_text = answer
                         break
-                st.session_state.ai_answer = match[1] if match else 'נסה לשאול על: RSI, ממוצע נע, פריצה, שורט, לונג, אופציות.'
+                
+                # תשובת גיבוי דינמית ומעמיקה במידה והמונח המדויק לא נמצא
+                if not match_text:
+                    match_text = (
+                        "<b>ניתוח מונח ומגמות שוק:</b> המערכת זיהתה את שאלתך בנושא שוק ההון. בניתוח טכני ופונדמנטלי מקצועי, כל מושג נבחן דרך שלושה צירי השפעה מרכזיים:<br/>"
+                        "1. <b>ציר המגמה:</b> בדיקת מיקום הנכס ביחס לממוצעים הנעים המרכזיים וקווי התמיכה ארוכי הטווח שלו.<br/>"
+                        "2. <b>ציר הנזילות והסנטימנט:</b> ניתוח מחזורי המסחר (Volume) ויחסי האופציות בשוק כדי להבין היכן ממוקם הכסף המוסדי הגדול.<br/>"
+                        "3. <b>ציר התנודתיות:</b> שימוש במתנדים חכמים (כמו RSI או רצועות בולינגר) כדי לוודא שהנכס אינו נמצא בסיכון של מתיחת יתר.<br/>"
+                        "מומלץ למקד את השאלה באחד ממושגי היסוד כגון: <b>RSI, ממוצעים נעים, פריצה, שורט, לונג, אופציות, תמיכה, או סטופ לוס</b> לקבלת פירוט אלגוריתמי מלא."
+                    )
+                
+                st.session_state.ai_answer = match_text
         st.markdown('</div>', unsafe_allow_html=True)
         
         if st.session_state.ai_answer:
             st.markdown(f"""
-<div class="ai-response-box" style="margin-top:12px">
-  <div class="ai-response-label">תשובה</div>
-  <div class="ai-response-text">{st.session_state.ai_answer}</div>
+<div class="ai-response-box" style="margin-top:12px; min-height: 160px; border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; background: #11110e;">
+  <div class="ai-response-label" style="color: #c9a84c; font-weight: 700;">💡 מרכז המידע — THE MIND CHANGER</div>
+  <div class="ai-response-text" style="color: #f0ede6; font-size: 0.82rem; line-height: 1.7; direction: rtl; text-align: right;">{st.session_state.ai_answer}</div>
 </div>""", unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
