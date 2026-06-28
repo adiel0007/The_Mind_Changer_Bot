@@ -240,7 +240,6 @@ def do_scan(mode):
             else:
                 is_5_days_red = all(float(close.iloc[-j]) < float(open_.iloc[-j]) for j in range(1, 6))
                 
-                # סינון השורט מחייב שהמחיר של היום ושל אתמול מתחת לממוצע 9 המתואם לחלוטין
                 if (last < ma9 and prev < ma9_prev 
                         and rsi > 30 and vol > 1_000_000
                         and float(close.iloc[-1]) < float(open_.iloc[-1])
@@ -259,8 +258,8 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        t     = yf.Ticker(ticker)
-        # סונכרן לחלוטין לקריאה של הסורק כדי למנוע סטיות בדאטה בין המסכים
+        session = get_session() # תוקן: שימוש באותו Session בדיוק כדי לסנכרן דאטה ולמנוע הבדלי שרתים וחסימות
+        t     = yf.Ticker(ticker, session=session)
         df    = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         if df.empty:
             return None
@@ -492,17 +491,17 @@ tab_long, tab_short, tab_ai = st.tabs(["📈 רדאר לונג", "📉 רדאר 
 with tab_long:
     col1, col2 = st.columns([1, 2])
     with col1:
-        # קריטריונים פשוטים ותמציתיים שמסתירים את הלוגיקה החשמלית מאחורי הקלעים
+        # תוקן: קריטריונים פשוטים, קצרים ומעורפלים לחלוטין כדי שלא יעתיקו את האלגוריתם
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר לונג</div>
   <div class="panel-sub">סריקת מניות במומנטום עולה</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>מגמת מחיר חיובית</li>
-    <li><div class="crit-dot dot-green"></div>מדדי מומנטום אופטימליים</li>
-    <li><div class="crit-dot dot-green"></div>מחזור מסחר ונזילות גבוהה</li>
-    <li><div class="crit-dot dot-green"></div>מנגנון הגנה מקניית יתר</li>
-    <li><div class="crit-dot dot-green"></div>תבנית מבנה נרות יציבה</li>
+    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
+    <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
+    <li><div class="crit-dot dot-green"></div>נפח מסחר: נזילות גבוהה</li>
+    <li><div class="crit-dot dot-green"></div>מבנה נרות: המשכיות עולה</li>
+    <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="long-btn">', unsafe_allow_html=True)
@@ -526,18 +525,18 @@ with tab_long:
 with tab_short:
     col1, col2 = st.columns([1, 2])
     with col1:
-        # קריטריונים פשוטים ותמציתיים שמסתירים את הלוגיקה החשמלית מאחורי הקלעים
+        # תוקן: קריטריונים פשוטים, קצרים ומעורפלים לחלוטין כדי שלא יעתיקו את האלגוריתם
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר שורט</div>
   <div class="panel-sub">סריקת מניות במומנטום יורד</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-red"></div>מגמת מחיר שלילית מובהקת</li>
-    <li><div class="crit-dot dot-red"></div>מדדי מומנטום דוביים</li>
-    <li><div class="crit-dot dot-red"></div>מחזור מסחר ונזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>תבנית מבנה נרות יציבה</li>
-    <li><div class="crit-dot dot-red"></div>מאזן פוזיציות ונגזרים תומך (Puts)</li>
-    <li><div class="crit-dot dot-red"></div>מנגנון הגנה ממכירת יתר קיצונית</li>
+    <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
+    <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
+    <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת</li>
+    <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
+    <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="short-btn">', unsafe_allow_html=True)
