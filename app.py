@@ -348,26 +348,27 @@ def render_cards(data, mode):
     )
     return f'<div class="card-grid">{cards}</div>'
 
+# ── תוקן: שימוש ב-.get() למניעת קריסת KeyError בריצה על מצב זיכרון ישן ──
 def render_analysis(d):
-    if not d:
+    if not d or not isinstance(d, dict):
         return ''
-    tag_cls = "tag-green" if d["up"] else "tag-red"
+    tag_cls = "tag-green" if d.get("up", True) else "tag-red"
     return (
         f'<div class="result-card">'
         f'<div class="result-card-header">'
-        f'<span>{d["ticker"]} &nbsp; {d["price"]} '
-        f'<small style="color:var(--muted);font-size:0.7rem">{d["chg"]}</small></span>'
-        f'<span class="result-tag {tag_cls}">{d["momentum"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">RSI (14)</span><span class="metric-value">{d["rsi"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">ממוצעים נעים</span><span class="metric-value">{d["ma"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">MA200</span><span class="metric-value">{d["ma200"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">אופציות</span><span class="metric-value">{d["options"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">עמידה בתחזיות</span><span class="metric-value">{d["earnings"]}</span></div>'
-        f'<div class="metric-row"><span class="metric-label">המלצת אנליסטים</span><span class="metric-value">{d["rec"]}</span></div>'
+        f'<span>{d.get("ticker", "")} &nbsp; {d.get("price", "")} '
+        f'<small style="color:var(--muted);font-size:0.7rem">{d.get("chg", "")}</small></span>'
+        f'<span class="result-tag {tag_cls}">{d.get("momentum", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">RSI (14)</span><span class="metric-value">{d.get("rsi", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">ממוצעים נעים</span><span class="metric-value">{d.get("ma", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">MA200</span><span class="metric-value">{d.get("ma200", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">אופציות</span><span class="metric-value">{d.get("options", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">עמידה בתחזיות</span><span class="metric-value">{d.get("earnings", "")}</span></div>'
+        f'<div class="metric-row"><span class="metric-label">המלצת אנליסטים</span><span class="metric-value">{d.get("rec", "")}</span></div>'
         f'</div>'
         f'<div class="ai-response-box">'
         f'<div class="ai-response-label">חוות דעת אנליסט — The Mind Changer</div>'
-        f'<div class="ai-response-text">{d["summary_text"]}</div></div>'
+        f'<div class="ai-response-text">{d.get("summary_text", "לא נמצאה חוות דעת עדכנית.")}</div></div>'
     )
 
 for k in ["long_results", "short_results", "analysis", "ai_answer"]:
