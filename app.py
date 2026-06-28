@@ -237,7 +237,6 @@ def get_fear_greed_data():
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            # הוצאת הערך מהמבנה הרשמי של האתר
             val = round(data.get("fear_and_greed", {}).get("score", 55))
             rating = data.get("fear_and_greed", {}).get("rating", "neutral").title()
             
@@ -347,19 +346,15 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # ── 2. משיכת נתוני אמת פונדמנטליים ישירות מהאינטרנט (דוחות, אנליסטים וצפי) ──
         info = t.info if t.info else {}
         
-        # חישוב אחוז אופציות חי ריאלי
         calls_ratio = round(50 + (rsi - 50) * 0.5 + random.uniform(-2, 2), 1)
         calls_ratio = max(10.0, min(95.0, calls_ratio))
         options_text = f"רוב אופציות קול ({calls_ratio}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100-calls_ratio:.1f}%)"
 
-        # דוחות כספיים אמיתיים בשנה האחרונה (מבוסס על היסטוריית הרווח למניה - EPS vs Estimate)
         try:
             calendar = t.calendar
-            earnings_history = t.get_shares_full() # גיבוי בדיקת פעילות חברה
-            # לוגיקה דינמית המבוססת על כיוון הצמיחה השנתי האמיתי של החברה באינטרנט
+            earnings_history = t.get_shares_full() 
             revenue_growth = info.get("revenueGrowth", 0.05)
             if revenue_growth > 0:
                 earnings_text = "עמדה בכל התחזיות בשנה האחרונה 4/4"
@@ -374,7 +369,6 @@ def analyze_ticker(ticker):
             earnings_badge = "4/4 הצלחה"
             earnings_pos = True
 
-        # צפי לרבעון הבא מבוסס על נתוני הצמיחה הרשמיים המפורסמים ברשת
         rev_growth_pct = round(info.get("revenueGrowth", 0.05) * 100, 1)
         if rev_growth_pct == 0:
             rev_growth_pct = round(random.uniform(4.5, 12.8), 1)
@@ -386,12 +380,10 @@ def analyze_ticker(ticker):
             forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
             forecast_pos = False
 
-        # המלצת אנליסטים באחוזים ישירות מנתוני הקונזנזוס החיים של החברה
         recommendation = info.get("recommendationKey", "buy")
         target_mean = info.get("targetMeanPrice", last)
         analyst_count = info.get("numberOfAnalystOpinions", 30)
         
-        # חישוב אחוז הרוב מנתוני השוק
         if recommendation in ["buy", "strong_buy"]:
             rec_pct = round(72.0 + (last/target_mean if target_mean else 1)*10 + random.uniform(-2,2), 1)
             rec_pct = max(55.0, min(98.0, rec_pct))
@@ -816,7 +808,6 @@ with tab_ai:
         qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה RSI? איך לזהות פריצה?", label_visibility="collapsed")
         st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
-        # ── 3. תוקן: מנוע שאלות מורחב ודינמי הנותן מענה מדויק לכל שאלה בשוק ההון ללא מילים קשיחות ──
         if st.button("שאל", key="qa_trigger"):
             if qa_val:
                 q = qa_val.strip().lower()
@@ -881,7 +872,7 @@ with tab_ai:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── 1. טאב מעודכן: בניית שעון גרפי מובנה (CSS Gauge) המתבסס על הציות החי ללא תלות ב-Iframe חסום ──
+# ── 1. טאב מעודכן: בניית שעון גרפי מובנה (CSS Gauge) ללא בעיות רינדור ──
 with tab_fear_greed:
     fg_val, fg_rating = get_fear_greed_data()
     
@@ -890,42 +881,44 @@ with tab_fear_greed:
     
     col_img, col_txt = st.columns([1, 1])
     with col_img:
+        # חובה לשמור את הבלוק הזה צמוד לגבול השמאלי! 
+        # הזחה של 4 רווחים ומעלה הופכת אותו לבלוק קוד ב-Markdown
         st.markdown(f"""
-        <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">
-            <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
-            <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
-            
-            <div class="gauge-container">
-                <div class="gauge-body"></div>
-                <div class="gauge-cover">
-                    <div>
-                        <span style="font-size: 3.2rem; font-weight: 900; color: #f0ede6; font-family: 'Inter'; display: block; line-height: 1;">{fg_val}</span>
-                    </div>
-                </div>
-                <div class="gauge-needle" style="transform: rotate({needle_angle}deg);"></div>
-            </div>
-            
-            <div style="margin-top: -10px;">
-                <span style="font-size: 0.95rem; font-weight: 700; color: #c9a84c; display: inline-block; background: rgba(201,168,76,0.06); padding: 6px 16px; border-radius: 3px; border: 1px solid rgba(201,168,76,0.15);">סטטוס שוק: {fg_rating}</span>
+<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">
+    <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
+    <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
+    
+    <div class="gauge-container">
+        <div class="gauge-body"></div>
+        <div class="gauge-cover">
+            <div>
+                <span style="font-size: 3.2rem; font-weight: 900; color: #f0ede6; font-family: 'Inter'; display: block; line-height: 1;">{fg_val}</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        <div class="gauge-needle" style="transform: rotate({needle_angle}deg);"></div>
+    </div>
+    
+    <div style="margin-top: -10px;">
+        <span style="font-size: 0.95rem; font-weight: 700; color: #c9a84c; display: inline-block; background: rgba(201,168,76,0.06); padding: 6px 16px; border-radius: 3px; border: 1px solid rgba(201,168,76,0.15);">סטטוס שוק: {fg_rating}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
         
     with col_txt:
         st.markdown("""
-        <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
-            <h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
-            <p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
-                מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
-            </p>
-            <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
-            <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
-                <li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
-                <li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
-                <li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
+    <h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
+    <p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
+        מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+    </p>
+    <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
+    <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
+        <li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
+        <li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
+        <li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
+    </ul>
+</div>
+""", unsafe_allow_html=True)
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
