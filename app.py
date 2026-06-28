@@ -497,8 +497,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {long_active}" id="tab-long">
       <div class="radar-layout">
-        <form action="/" method="get" target="_parent" class="panel-card">
-          <input type="hidden" name="scan" value="long"/>
+        <div class="panel-card">
           <div class="panel-title">רדאר לונג</div>
           <div class="panel-sub">מניות עם מומנטום עולה</div>
           <ul class="criteria-list">
@@ -509,8 +508,8 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-green"></div>יומיים ירוקים רצופים</li>
             <li><div class="crit-dot dot-green"></div>סגירה גבוהה מאתמול</li>
           </ul>
-          <button type="submit" class="scan-btn scan-green">התחל סריקת לונג ⚡</button>
-        </form>
+          <button class="scan-btn scan-green" onclick="triggerNav('scan','long')">התחל סריקת לונג ⚡</button>
+        </div>
         <div class="results-panel">
           <div class="results-header">
             <div class="results-title">תוצאות סריקה</div>
@@ -523,8 +522,7 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {short_active}" id="tab-short">
       <div class="radar-layout">
-        <form action="/" method="get" target="_parent" class="panel-card">
-          <input type="hidden" name="scan" value="short"/>
+        <div class="panel-card">
           <div class="panel-title">רדאר שורט</div>
           <div class="panel-sub">מניות עם מומנטום יורד</div>
           <ul class="criteria-list">
@@ -535,8 +533,8 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
             <li><div class="crit-dot dot-red"></div>סגירה נמוכה מאתמול</li>
             <li><div class="crit-dot dot-red"></div>Puts חזקים מ-Calls</li>
           </ul>
-          <button type="submit" class="scan-btn scan-red">התחל סריקת שורט ⚡</button>
-        </form>
+          <button class="scan-btn scan-red" onclick="triggerNav('scan','short')">התחל סריקת שורט ⚡</button>
+        </div>
         <div class="results-panel">
           <div class="results-header">
             <div class="results-title">תוצאות סריקה</div>
@@ -549,14 +547,14 @@ footer{{background:var(--bg2);border-top:1px solid var(--border);padding:36px 40
 
     <div class="tab-panel {ai_active}" id="tab-ai">
       <div class="ai-grid">
-        <form action="/" method="get" target="_parent" class="panel-card">
+        <div class="panel-card">
           <div class="panel-title">ניתוח מניה בודדת</div>
           <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
           <div class="input-label">סימול מניה</div>
-          <input class="ai-input" name="analyze" placeholder="AAPL, TSLA, NVDA..." value="{ticker_val}" required/>
-          <button type="submit" class="scan-btn scan-gold">נתח מניה</button>
+          <input class="ai-input" id="analyze-input" placeholder="AAPL, TSLA, NVDA..." value="{ticker_val}"/>
+          <button class="scan-btn scan-gold" onclick="triggerNav('analyze', document.getElementById('analyze-input').value.trim().toUpperCase())">נתח מניה</button>
           {analysis_html}
-        </form>
+        </div>
         <div class="panel-card">
           <div class="panel-title">שאלות כלליות</div>
           <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
@@ -689,8 +687,28 @@ function answerQ() {{
     '</div>';
 }}
 
-document.getElementById('ai-q').addEventListener('keydown', function(e) {{
-  if (e.key === 'Enter') answerQ();
+function triggerNav(param, value) {{
+  if (!value) return;
+  // מנסה לנווט את החלון הראשי (עובד בכל דפדפן)
+  var url = window.location.href.split('?')[0] + '?' + param + '=' + encodeURIComponent(value);
+  try {{
+    // נסיון 1: top window (Chrome/Firefox מחשב)
+    window.top.location.href = url;
+  }} catch(e) {{
+    try {{
+      // נסיון 2: parent frame (Safari/נייד)
+      window.parent.location.href = url;
+    }} catch(e2) {{
+      // נסיון 3: fallback — אותו חלון
+      window.location.href = url;
+    }}
+  }}
+}}
+
+document.getElementById('analyze-input').addEventListener('keydown', function(e) {{
+  if (e.key === 'Enter') {{
+    triggerNav('analyze', this.value.trim().toUpperCase());
+  }}
 }});
 
 buildTape();
