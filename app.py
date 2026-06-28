@@ -238,10 +238,9 @@ def do_scan(mode):
                         and last > prev):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                # חוק סינון 3: בודק האם ב-5 ימי המסחר האחרונים כל יום בנפרד נסגר שלילי/אדום
                 is_5_days_red = all(float(close.iloc[-j]) < float(open_.iloc[-j]) for j in range(1, 6))
                 
-                # סינון שורט: מוודא שהמחיר של היום ושל אתמול מתחת לממוצע 9 האמיתי והמתואם, ושאינו סחוט 5 ימים רצוף
+                # סינון השורט מחייב שהמחיר של היום ושל אתמול מתחת לממוצע 9 המתואם לחלוטין
                 if (last < ma9 and prev < ma9_prev 
                         and rsi > 30 and vol > 1_000_000
                         and float(close.iloc[-1]) < float(open_.iloc[-1])
@@ -261,11 +260,12 @@ def do_scan(mode):
 def analyze_ticker(ticker):
     try:
         t     = yf.Ticker(ticker)
-        df    = t.history(period="1y", auto_adjust=True)
+        # סונכרן לחלוטין לקריאה של הסורק כדי למנוע סטיות בדאטה בין המסכים
+        df    = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         if df.empty:
             return None
-        df    = df.dropna(subset=["Close", "Open"]) # תוקן: מונע הסטת ימים ומסנכרן קולים/פוטים וממוצעים
-        close = df["Close"].squeeze()
+        df    = df.dropna(subset=["Close", "Open"])
+        close = df["Close"]
         last  = float(close.iloc[-1])
         prev  = float(close.iloc[-2])
         rsi   = calculate_rsi(close)
@@ -364,7 +364,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .tape-item{{font-size:0.68rem;font-weight:600;letter-spacing:0.06em;padding:0 24px;border-right:1px solid rgba(201,168,76,0.12);display:flex;align-items:center;gap:8px;height:30px}}
 .tape-sym{{color:#9a8f7a}}.tape-up{{color:#16a34a}}.tape-dn{{color:#dc2626}}
 #hero{{display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:100px 40px 48px;gap:40px;position:relative;overflow:hidden;}}
-.hero-bg-img{{position:absolute;inset:0;z-index:0;background:linear-gradient(to left,rgba(10,10,8,0.15) 0%,rgba(10,10,8,0.7) 45%,rgba(10,10,8,1) 72%),url('https://images.unsplash.com/photo-1611974789855-9c2a0a7233a3?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat}}
+.hero-bg-img{{position:absolute;inset:0;z-index:0;background:linear-gradient(to left,rgba(10,10,8,0.15) 0%,rgba(10,10,8,0.7) 45%,rgba(10,10,8,1) 72%),url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat}}
 .hero-left{{position:relative;z-index:1}}
 .eyebrow{{display:flex;align-items:center;gap:8px;margin-bottom:18px}}
 .eyebrow-line{{width:28px;height:1px;background:#c9a84c}}
@@ -492,18 +492,17 @@ tab_long, tab_short, tab_ai = st.tabs(["📈 רדאר לונג", "📉 רדאר 
 with tab_long:
     col1, col2 = st.columns([1, 2])
     with col1:
-        # הטקסטים שונו למונחים מוסדיים מעורפלים כדי להסתיר את הנוסחאות המדויקות
+        # קריטריונים פשוטים ותמציתיים שמסתירים את הלוגיקה החשמלית מאחורי הקלעים
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר לונג</div>
-  <div class="panel-sub">פרוטוקול זיהוי מומנטום שורי מוסדי</div>
+  <div class="panel-sub">סריקת מניות במומנטום עולה</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>אינטגרציית מגמה אדפטיבית לטווח קצר</li>
-    <li><div class="crit-dot dot-green"></div>קורלציית אוסילטורים ומדדי מומנטום מסונכרנת</li>
-    <li><div class="crit-dot dot-green"></div>מסנן נזילות וזרימת כסף מוסדית מורחב</li>
-    <li><div class="crit-dot dot-green"></div>אלגוריתם שלילת מתיחת-יתר מבנית</li>
-    <li><div class="crit-dot dot-green"></div>אימות רצף ותבנית נר יומי נכנס</li>
-    <li><div class="crit-dot dot-green"></div>יחס פוזיציות אופטימלי במחיר סגירה</li>
+    <li><div class="crit-dot dot-green"></div>מגמת מחיר חיובית</li>
+    <li><div class="crit-dot dot-green"></div>מדדי מומנטום אופטימליים</li>
+    <li><div class="crit-dot dot-green"></div>מחזור מסחר ונזילות גבוהה</li>
+    <li><div class="crit-dot dot-green"></div>מנגנון הגנה מקניית יתר</li>
+    <li><div class="crit-dot dot-green"></div>תבנית מבנה נרות יציבה</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="long-btn">', unsafe_allow_html=True)
@@ -515,7 +514,7 @@ with tab_long:
         long_count = f"{len(st.session_state.long_results)} מניות" if st.session_state.long_results is not None else "—"
         long_cards = render_cards(st.session_state.long_results, "long")
         st.markdown(f"""
-<div class="results-panel" style="margin-top:15px; min-height: 312px;">
+<div class="results-panel" style="margin-top:15px; min-height: 254px;">
   <div class="results-header">
     <div class="results-title">תוצאות סריקה</div>
     <div class="results-count">{long_count}</div>
@@ -527,18 +526,18 @@ with tab_long:
 with tab_short:
     col1, col2 = st.columns([1, 2])
     with col1:
-        # הטקסטים שונו למונחים מוסדיים מעורפלים כדי להסתיר את הנוסחאות המדויקות
+        # קריטריונים פשוטים ותמציתיים שמסתירים את הלוגיקה החשמלית מאחורי הקלעים
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר שורט</div>
-  <div class="panel-sub">פרוטוקול זיהוי מומנטום דובים מתקדם</div>
+  <div class="panel-sub">סריקת מניות במומנטום יורד</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-red"></div>מדידת סטיית מגמה אדפטיבית רב-יומית</li>
-    <li><div class="crit-dot dot-red"></div>מדדי קיצון ואוסילטורים תומכי מומנטום</li>
-    <li><div class="crit-dot dot-red"></div>מסנן נזילות וזרימת כסף מוסדית מורחב</li>
-    <li><div class="crit-dot dot-red"></div>אימות רצף ותבנית נר יומי יוצא</li>
-    <li><div class="crit-dot dot-red"></div>יחס פוזיציות פתוחות ונגזרי דלתא שוק</li>
-    <li><div class="crit-dot dot-red"></div>אלגוריתם שלילת מיצוי מגמה רב-יומי</li>
+    <li><div class="crit-dot dot-red"></div>מגמת מחיר שלילית מובהקת</li>
+    <li><div class="crit-dot dot-red"></div>מדדי מומנטום דוביים</li>
+    <li><div class="crit-dot dot-red"></div>מחזור מסחר ונזילות גבוהה</li>
+    <li><div class="crit-dot dot-red"></div>תבנית מבנה נרות יציבה</li>
+    <li><div class="crit-dot dot-red"></div>מאזן פוזיציות ונגזרים תומך (Puts)</li>
+    <li><div class="crit-dot dot-red"></div>מנגנון הגנה ממכירת יתר קיצונית</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="short-btn">', unsafe_allow_html=True)
@@ -550,7 +549,7 @@ with tab_short:
         short_count = f"{len(st.session_state.short_results)} מניות" if st.session_state.short_results is not None else "—"
         short_cards = render_cards(st.session_state.short_results, "short")
         st.markdown(f"""
-<div class="results-panel" style="margin-top:15px; min-height: 312px;">
+<div class="results-panel" style="margin-top:15px; min-height: 288px;">
   <div class="results-header">
     <div class="results-title">תוצאות סריקה</div>
     <div class="results-count">{short_count}</div>
@@ -642,7 +641,7 @@ footer{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12);padding:36p
 .footer-logo{font-family:'Playfair Display',serif;font-size:1rem;font-weight:700;color:#c9a84c;margin-bottom:6px}
 .footer-copy{font-size:0.72rem;color:#7a7060}
 .footer-links{display:flex;gap:24px}
-.footer-links a{font-size:0.72rem;color:#7a7060;text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer}
+.footer-links a{{font-size:0.72rem;color:#7a7060;text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer}}
 .footer-links a:hover{{color:#c9a84c}}
 </style></head>
 <body>
