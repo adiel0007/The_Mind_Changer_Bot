@@ -105,6 +105,14 @@ div.stButton > button:hover {{ opacity: 0.88 !important; }}
 .short-btn div[data-testid="stButton"] button {{ background-color: #dc2626 !important; color: white !important; }}
 .gold-btn div[data-testid="stButton"] button {{ background-color: #c9a84c !important; color: #0a0a08 !important; }}
 
+/* עיצוב ייעודי לכפתור סינון ווליום מתקדם - ירוק כמו לונג */
+.filter-more-btn div[data-testid="stButton"] button {{
+    background-color: #16a34a !important;
+    color: white !important;
+    border-radius: 4px !important;
+    margin-top: 15px !important;
+}}
+
 div[data-testid="stTextInput"] input {{
     background-color: rgba(255, 255, 255, 0.03) !important;
     border: 1px solid rgba(201, 168, 76, 0.12) !important;
@@ -213,7 +221,6 @@ def do_scan(mode):
             if df.empty or len(df) < 200:
                 continue
             
-            # תוקן: מסננים שורות ריקות לחלוטין ושורות פנטום ללא מחזור מסחר אמיתי
             df = df.dropna(subset=["Close", "Open", "Volume"])
             df = df[df["Volume"] > 1000]
             
@@ -226,7 +233,7 @@ def do_scan(mode):
             
             ma9_series = close.rolling(9).mean()
             ma9   = float(ma9_series.iloc[-1])
-            ma9_prev = float(ma9_series.iloc[-2]) # ערך הממוצע ביום הקודם
+            ma9_prev = float(ma9_series.iloc[-2])
             
             ma100 = float(close.rolling(100).mean().iloc[-1])
             ma200 = float(close.rolling(200).mean().iloc[-1])
@@ -234,14 +241,14 @@ def do_scan(mode):
             chg   = round(((last - prev) / prev) * 100, 2)
             
             if mode == "long":
-                # תוקן: מחייב שגם היום וגם אתמול יהיו מעל ממוצע 9 המתואם והאמיתי
+                # תוקן: הגדרה כפולה ומחמירה - גם אחוז השינוי חייב להיות חיובי וגם המחיר האחרון גבוה מאתמול
                 if (last > ma9 and prev > ma9_prev
                         and rsi < 70 and vol > 1_000_000
                         and not (last > ma9 and last > ma100 and last > ma200)
                         and not (last < ma9 and last < ma100 and last < ma200)
                         and float(close.iloc[-1]) > float(open_.iloc[-1])
                         and float(close.iloc[-2]) > float(open_.iloc[-2])
-                        and last > prev):
+                        and last > prev and chg > 0):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
                 is_5_days_red = all(float(close.iloc[-j]) < float(open_.iloc[-j]) for j in range(1, 6))
@@ -250,7 +257,7 @@ def do_scan(mode):
                         and rsi > 30 and vol > 1_000_000
                         and float(close.iloc[-1]) < float(open_.iloc[-1])
                         and float(close.iloc[-2]) < float(open_.iloc[-2])
-                        and last < prev
+                        and last < prev and chg < 0
                         and not is_5_days_red):
                     seed = sum(ord(c) for c in ticker)
                     random.seed(seed)
@@ -270,7 +277,6 @@ def analyze_ticker(ticker):
         if df.empty:
             return None
         
-        # תוקן: סינון שורות פנטום גם במערכת הניתוח הבודד לסנכרון מלא
         df = df.dropna(subset=["Close", "Open", "Volume"])
         df = df[df["Volume"] > 1000]
         
@@ -529,6 +535,31 @@ with tab_long:
   </div>
   {long_cards}
 </div>""", unsafe_allow_html=True)
+        
+        # כפתור סינון ווליום מתקדם - מוצג רק אם קיימות תוצאות סריקה ראשוניות
+        if st.session_state.long_results:
+            st.markdown('<div class="filter-more-btn">', unsafe_allow_html=True)
+            if st.button("תסנן לי עוד ⚡", key="deep_filter_volume_trigger"):
+                with st.spinner("מבצע סינון עומק מחזורי..."):
+                    deep_filtered = []
+                    session = get_session()
+                    for item in st.session_state.long_results:
+                        try:
+                            ticker_sym = item["symbol"]
+                            ticker_obj = yf.Ticker(ticker_sym, session=session)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                            hist = hist.dropna(subset=["Volume"])
+                            if len(hist) >= 20:
+                                # חוק סינון: ממוצע ווליום של 3 ימים אחרונים גדול מממוצע הווליום הכללי של 20 הימים האחרונים
+                                avg_vol_3d = hist["Volume"].iloc[-3:].mean()
+                                avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
+                                if avg_vol_3d > avg_vol_20d:
+                                    deep_filtered.append(item)
+                        except:
+                            pass
+                    st.session_state.long_results = deep_filtered
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
 # ── טאב שורט ──
 with tab_short:
