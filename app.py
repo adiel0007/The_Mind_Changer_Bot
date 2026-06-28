@@ -9,7 +9,7 @@ import contextlib
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
-# ── ה-CSS המקורי שלך משולב עם עיצוב השעון החדש ──
+# ── ה-CSS המקורי של הפאנלים והעיצוב הכללי ──
 SHARED_CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -54,41 +54,6 @@ body{background:#0a0a08;color:var(--text);font-family:'Inter',sans-serif;directi
 .ai-response-box{margin-top:12px;padding:15px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.12);border-radius:3px;border-right:3px solid #c9a84c;}
 .ai-response-label{font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#c9a84c;text-transform:uppercase;margin-bottom:6px;text-align:right;}
 .ai-response-text{font-size:0.82rem;color:#9a8f7a;line-height:1.7;direction:rtl;text-align:right}
-
-/* עיצוב שעון הפחד והגרידיות המובנה החדש */
-.gauge-container {
-    position: relative;
-    width: 300px;
-    height: 150px;
-    margin: 20px auto;
-    overflow: hidden;
-}
-.gauge-body {
-    position: absolute;
-    top: 0; left: 0;
-    width: 300px; height: 300px;
-    border-radius: 50%;
-    background: conic-gradient(from 270deg, #dc2626 0deg 45deg, #ea580c 45deg 90deg, #eab308 90deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);
-}
-.gauge-cover {
-    position: absolute;
-    top: 25px; left: 25px;
-    width: 250px; height: 250px;
-    border-radius: 50%;
-    background: #141410;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 40px;
-}
-.gauge-needle {
-    position: absolute;
-    bottom: 150px; left: 150px;
-    width: 4px; height: 130px;
-    background: #f0ede6;
-    transform-origin: bottom center;
-    transition: transform 0.8s ease-in-out;
-}
 """
 
 st.markdown(f"""
@@ -844,7 +809,7 @@ with tab_ai:
                         "📊 <b>ניתוח טכני ומסקנת מסחר:</b> תעודת הסל נסחרת ב-3 ימי המסחר האחרונים בצורה עקבית מעל ממוצעים נעים 100 ו-200 ימים המשקפים מגמת מאקרו שורית ארוכת טווח. מדד ה-RSI עומד על רמת 61 מאוזנת המעידה על המשכיות מומנטום קונים בריא, המצדיק עסקאות <b>לונג (Long)</b> בתיקונים טכניים קצרים."
                     )
                 
-                # ב. ניתוח דינמי ומענה מדויק לכל שאלה כללית בשוק ההון (ממוצעים, השקעות, אופציות, בורסה וכו')
+                # ב. ניתוח דינמי ומענה מדויק לכל שאלה כללית בשוק ההון
                 elif any(word in q for word in ["ממוצע", "ma9", "ma200", "נע"]):
                     st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת כדי לזהות מגמה ולסנן רעשי שוק זמניים.<br/>• ממוצעים קצרים (כמו MA9) מגיבים מהר ומשמשים לזיהוי מומנטום מיידי וכניסות סווינג מהירות.<br/>• ממוצעים ארוכים (כמו MA100 ו-MA200) מייצגים את מגמת המאקרו הראשית של השוק - מסחר מעליהם ב-3 ימי המסחר האחרונים מאותת על מבנה שורי (לונג), ומסחר מתחתיהם על מבנה דובי (שורט). הפקודה משמשת גם כרמת תמיכה והתנגדות דינמית."
                 elif "rsi" in q or "מתנד" in q or "עוצמה" in q:
@@ -872,49 +837,56 @@ with tab_ai:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── 1. טאב מעודכן: בניית שעון גרפי מובנה (CSS Gauge) - ללא בעיות פיענוח ──
+# ── 1. טאב מעודכן: שעון הפחד והגרידיות - עיצוב מחולק למקטעים בסגנון CNN ──
 with tab_fear_greed:
     fg_val, fg_rating = get_fear_greed_data()
     needle_angle = (fg_val / 100) * 180 - 90
     
     col_img, col_txt = st.columns([1, 1])
     with col_img:
-        # כל ה-HTML נכתב ברצף וללא הזחות של שורות חדשות כדי לעקוף את באג המארקדאון
-        html_gauge = (
-            '<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">'
-            '<h3 style="font-family: \'Playfair Display\', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>'
-            '<p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>'
-            '<div class="gauge-container">'
-            '<div class="gauge-body"></div>'
-            '<div class="gauge-cover">'
-            '<div>'
-            f'<span style="font-size: 3.2rem; font-weight: 900; color: #f0ede6; font-family: \'Inter\'; display: block; line-height: 1;">{fg_val}</span>'
-            '</div>'
-            '</div>'
-            f'<div class="gauge-needle" style="transform: rotate({needle_angle}deg);"></div>'
-            '</div>'
-            '<div style="margin-top: -10px;">'
-            f'<span style="font-size: 0.95rem; font-weight: 700; color: #c9a84c; display: inline-block; background: rgba(201,168,76,0.06); padding: 6px 16px; border-radius: 3px; border: 1px solid rgba(201,168,76,0.15);">סטטוס שוק: {fg_rating}</span>'
-            '</div>'
-            '</div>'
-        )
+        # הקוד מיושר לשמאל (ללא הזחות) כדי ש-Streamlit לא יפרש אותו כבלוק קוד בטעות!
+        html_gauge = f"""<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">
+<h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
+<p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
+<div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
+<div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
+<div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
+<div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
+<span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
+</div>
+<!-- מחוג משודרג ומעוצב -->
+<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
+<div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
+</div>
+</div>
+<div style="margin-top: 25px;">
+<span style="font-size: 0.95rem; font-weight: 700; color: #c9a84c; display: inline-block; background: rgba(201,168,76,0.06); padding: 6px 16px; border-radius: 3px; border: 1px solid rgba(201,168,76,0.15);">סטטוס שוק: {fg_rating}</span>
+</div>
+</div>"""
         st.markdown(html_gauge, unsafe_allow_html=True)
         
     with col_txt:
-        html_text = (
-            '<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">'
-            '<h3 style="font-family: \'Playfair Display\', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>'
-            '<p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">'
-            'מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.'
-            '</p>'
-            '<h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>'
-            '<ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">'
-            '<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>'
-            '<li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>'
-            '<li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>'
-            '</ul>'
-            '</div>'
-        )
+        html_text = """<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
+<h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
+<p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
+מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+</p>
+<h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
+<ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
+<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
+<li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
+<li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
+</ul>
+</div>"""
         st.markdown(html_text, unsafe_allow_html=True)
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
