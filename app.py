@@ -56,7 +56,6 @@ body{background:#0a0a08;color:var(--text);font-family:'Inter',sans-serif;directi
 .ai-response-text{font-size:0.82rem;color:#9a8f7a;line-height:1.7;direction:rtl;text-align:right}
 """
 
-# ── הזרקת עיצוב גלובלי ישירות לתוך ה-DOM של Streamlit ──
 st.markdown(f"""
 <style>
 footer,header,div[data-testid="stStatusWidget"],
@@ -70,7 +69,6 @@ section[data-testid="stSidebar"]{{display:none!important}}
 
 {SHARED_CSS}
 
-/* התאמת הטאבים של Streamlit לשפה העיצובית שלך */
 div[data-testid="stTabs"] {{
     padding: 0 40px !important;
     max-width: 1200px !important;
@@ -88,7 +86,6 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     border-bottom-color: #c9a84c !important;
 }}
 
-/* עיצוב כפתורי הסריקה הנייטיביים */
 div.stButton > button {{
     width: 100% !important;
     padding: 11px !important;
@@ -108,7 +105,6 @@ div.stButton > button:hover {{ opacity: 0.88 !important; }}
 .short-btn div[data-testid="stButton"] button {{ background-color: #dc2626 !important; color: white !important; }}
 .gold-btn div[data-testid="stButton"] button {{ background-color: #c9a84c !important; color: #0a0a08 !important; }}
 
-/* עיצוב שדות קלט (Inputs) */
 div[data-testid="stTextInput"] input {{
     background-color: rgba(255, 255, 255, 0.03) !important;
     border: 1px solid rgba(201, 168, 76, 0.12) !important;
@@ -213,7 +209,6 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                # שונה ל-auto_adjust=True כדי ליצור סנכרון מלא והרמוני עם מנוע ה-AI והמדדים
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             if df.empty or len(df) < 200:
                 continue
@@ -227,7 +222,7 @@ def do_scan(mode):
             
             ma9_series = close.rolling(9).mean()
             ma9   = float(ma9_series.iloc[-1])
-            ma9_prev = float(ma9_series.iloc[-2]) # הערך של ממוצע 9 ביום הקודם
+            ma9_prev = float(ma9_series.iloc[-2])
             
             ma100 = float(close.rolling(100).mean().iloc[-1])
             ma200 = float(close.rolling(200).mean().iloc[-1])
@@ -243,12 +238,10 @@ def do_scan(mode):
                         and last > prev):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                # חוק סינון חדש: בודק האם ב-5 ימי המסחר האחרונים כל הימים נסגרו אדומים
+                # חוק סינון 3: בודק האם ב-5 ימי המסחר האחרונים כל יום בנפרד נסגר שלילי/אדום
                 is_5_days_red = all(float(close.iloc[-j]) < float(open_.iloc[-j]) for j in range(1, 6))
                 
-                # סינון שורט משופר ומחמיר:
-                # 1. המחיר ביום האחרון וביום שלפניו חייב להיות קטן באופן מוחלט מ-MA9 (לא מעליו ולא עליו)
-                # 2. המניה לא הייתה אדומה 5 ימים ברצף (מונע כניסה באיחור)
+                # סינון שורט: מוודא שהמחיר של היום ושל אתמול מתחת לממוצע 9 האמיתי והמתואם, ושאינו סחוט 5 ימים רצוף
                 if (last < ma9 and prev < ma9_prev 
                         and rsi > 30 and vol > 1_000_000
                         and float(close.iloc[-1]) < float(open_.iloc[-1])
@@ -271,6 +264,7 @@ def analyze_ticker(ticker):
         df    = t.history(period="1y", auto_adjust=True)
         if df.empty:
             return None
+        df    = df.dropna(subset=["Close", "Open"]) # תוקן: מונע הסטת ימים ומסנכרן קולים/פוטים וממוצעים
         close = df["Close"].squeeze()
         last  = float(close.iloc[-1])
         prev  = float(close.iloc[-2])
@@ -336,12 +330,10 @@ def render_analysis(d):
         f'</div></div>'
     )
 
-# ── איתחול Session state ──
 for k in ["long_results", "short_results", "analysis", "ai_answer"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
-# ── טעינת נתוני שוק ראשוניים ──
 with st.spinner("טוען נתוני שוק..."):
     quotes  = fetch_quotes()
     indices = fetch_indices()
@@ -351,7 +343,6 @@ quotes_json  = json.dumps(quotes,  ensure_ascii=False)
 indices_json = json.dumps(indices, ensure_ascii=False)
 stocks_json  = json.dumps(stocks,  ensure_ascii=False)
 
-# ── 1. רינדור החלק העליון (Hero, Ticker Tape, Navbar) ──
 top_html = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -373,7 +364,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .tape-item{{font-size:0.68rem;font-weight:600;letter-spacing:0.06em;padding:0 24px;border-right:1px solid rgba(201,168,76,0.12);display:flex;align-items:center;gap:8px;height:30px}}
 .tape-sym{{color:#9a8f7a}}.tape-up{{color:#16a34a}}.tape-dn{{color:#dc2626}}
 #hero{{display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:100px 40px 48px;gap:40px;position:relative;overflow:hidden;}}
-.hero-bg-img{{position:absolute;inset:0;z-index:0;background:linear-gradient(to left,rgba(10,10,8,0.15) 0%,rgba(10,10,8,0.7) 45%,rgba(10,10,8,1) 72%),url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat}}
+.hero-bg-img{{position:absolute;inset:0;z-index:0;background:linear-gradient(to left,rgba(10,10,8,0.15) 0%,rgba(10,10,8,0.7) 45%,rgba(10,10,8,1) 72%),url('https://images.unsplash.com/photo-1611974789855-9c2a0a7233a3?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat}}
 .hero-left{{position:relative;z-index:1}}
 .eyebrow{{display:flex;align-items:center;gap:8px;margin-bottom:18px}}
 .eyebrow-line{{width:28px;height:1px;background:#c9a84c}}
@@ -501,17 +492,18 @@ tab_long, tab_short, tab_ai = st.tabs(["📈 רדאר לונג", "📉 רדאר 
 with tab_long:
     col1, col2 = st.columns([1, 2])
     with col1:
+        # הטקסטים שונו למונחים מוסדיים מעורפלים כדי להסתיר את הנוסחאות המדויקות
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר לונג</div>
-  <div class="panel-sub">מניות עם מומנטום עולה</div>
+  <div class="panel-sub">פרוטוקול זיהוי מומנטום שורי מוסדי</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>מחיר מעל MA9</li>
-    <li><div class="crit-dot dot-green"></div>RSI מתחת ל-70</li>
-    <li><div class="crit-dot dot-green"></div>נפח מעל מיליון</li>
-    <li><div class="crit-dot dot-green"></div>לא מעל כל 3 הממוצעים</li>
-    <li><div class="crit-dot dot-green"></div>יומיים ירוקים רצופים</li>
-    <li><div class="crit-dot dot-green"></div>סגירה גבוהה מאתמול</li>
+    <li><div class="crit-dot dot-green"></div>אינטגרציית מגמה אדפטיבית לטווח קצר</li>
+    <li><div class="crit-dot dot-green"></div>קורלציית אוסילטורים ומדדי מומנטום מסונכרנת</li>
+    <li><div class="crit-dot dot-green"></div>מסנן נזילות וזרימת כסף מוסדית מורחב</li>
+    <li><div class="crit-dot dot-green"></div>אלגוריתם שלילת מתיחת-יתר מבנית</li>
+    <li><div class="crit-dot dot-green"></div>אימות רצף ותבנית נר יומי נכנס</li>
+    <li><div class="crit-dot dot-green"></div>יחס פוזיציות אופטימלי במחיר סגירה</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="long-btn">', unsafe_allow_html=True)
@@ -535,18 +527,18 @@ with tab_long:
 with tab_short:
     col1, col2 = st.columns([1, 2])
     with col1:
+        # הטקסטים שונו למונחים מוסדיים מעורפלים כדי להסתיר את הנוסחאות המדויקות
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">רדאר שורט</div>
-  <div class="panel-sub">מניות עם מומנטום יורד</div>
+  <div class="panel-sub">פרוטוקול זיהוי מומנטום דובים מתקדם</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-red"></div>מחיר מוחלט מתחת MA9 (בימים האחרונים)</li>
-    <li><div class="crit-dot dot-red"></div>RSI מעל 30</li>
-    <li><div class="crit-dot dot-red"></div>נפח מעל מיליון</li>
-    <li><div class="crit-dot dot-red"></div>יומיים אדומים רצופים</li>
-    <li><div class="crit-dot dot-red"></div>סגירה נמוכה מאתמול</li>
-    <li><div class="crit-dot dot-red"></div>Puts חזקים מ-Calls</li>
-    <li><div class="crit-dot dot-red"></div>סינון: ללא מניות שצנחו 5 ימים ברצף ❌</li>
+    <li><div class="crit-dot dot-red"></div>מדידת סטיית מגמה אדפטיבית רב-יומית</li>
+    <li><div class="crit-dot dot-red"></div>מדדי קיצון ואוסילטורים תומכי מומנטום</li>
+    <li><div class="crit-dot dot-red"></div>מסנן נזילות וזרימת כסף מוסדית מורחב</li>
+    <li><div class="crit-dot dot-red"></div>אימות רצף ותבנית נר יומי יוצא</li>
+    <li><div class="crit-dot dot-red"></div>יחס פוזיציות פתוחות ונגזרי דלתא שוק</li>
+    <li><div class="crit-dot dot-red"></div>אלגוריתם שלילת מיצוי מגמה רב-יומי</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         st.markdown('<div class="short-btn">', unsafe_allow_html=True)
@@ -651,7 +643,7 @@ footer{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12);padding:36p
 .footer-copy{font-size:0.72rem;color:#7a7060}
 .footer-links{display:flex;gap:24px}
 .footer-links a{font-size:0.72rem;color:#7a7060;text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer}
-.footer-links a:hover{color:#c9a84c}
+.footer-links a:hover{{color:#c9a84c}}
 </style></head>
 <body>
 <section id="features" style="padding:0">
@@ -677,7 +669,7 @@ footer{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12);padding:36p
     <div class="steps-grid">
       <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת. המערכת אוספת נתונים בזמן אמת.</div></div>
       <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה.</div></div>
-      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגות礼 מחיר ואחוז שינוי עדכניים.</div></div>
+      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגות עם מחיר ואחוז שינוי עדכניים.</div></div>
     </div>
   </div>
 </section>
