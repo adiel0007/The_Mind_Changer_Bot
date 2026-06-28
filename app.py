@@ -1,12 +1,10 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
+import json
 import random
-import time
-import os
 import requests
+import os
 import contextlib
 
 app = FastAPI()
