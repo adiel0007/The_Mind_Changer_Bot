@@ -154,7 +154,7 @@ div[data-testid="stTextInput"] input {{
 
 def get_session():
     agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     ]
     s = requests.Session()
     s.headers.update({'User-Agent': random.choice(agents)})
@@ -227,13 +227,20 @@ def fetch_live_stocks():
 
 def get_fear_greed_data():
     try:
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/current"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        r = requests.get(url, headers=headers, timeout=5)
+        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://edition.cnn.com/",
+            "Origin": "https://edition.cnn.com"
+        }
+        r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
+            # הוצאת הערך מהמבנה הרשמי של האתר
             val = round(data.get("fear_and_greed", {}).get("score", 55))
             rating = data.get("fear_and_greed", {}).get("rating", "neutral").title()
+            
             hebrew_mapping = {
                 "Extreme Fear": "פחד קיצוני 😨",
                 "Fear": "פחד 😰",
@@ -888,7 +895,6 @@ with tab_fear_greed:
             <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
             <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
             
-            <!-- השעון המובנה המעוצב החדש שלא ייחסם לעולם -->
             <div class="gauge-container">
                 <div class="gauge-body"></div>
                 <div class="gauge-cover">
