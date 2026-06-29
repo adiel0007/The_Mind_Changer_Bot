@@ -230,8 +230,8 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
-            if df.empty or len(df) < 200:
+                df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+            if df.empty or len(df) < 50:
                 continue
             
             df = df.dropna(subset=["Close", "Open", "Volume"])
@@ -244,8 +244,10 @@ def do_scan(mode):
             ma9   = float(ma9_series.iloc[-1])
             ma9_prev = float(ma9_series.iloc[-2])
             
-            ma100 = float(close.rolling(100).mean().iloc[-1])
-            ma200 = float(close.rolling(200).mean().iloc[-1])
+            # הגנה מפני קריסה במניות ללא מספיק היסטוריה לממוצעים ארוכים
+            ma100 = float(close.rolling(100).mean().iloc[-1]) if len(close) >= 100 else last
+            ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else last
+            
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
@@ -256,9 +258,15 @@ def do_scan(mode):
                         and last > prev and chg > 0):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                if (last < ma9 and prev < ma9_prev and rsi > 30 and vol > 1_000_000
-                        and float(close.iloc[-1]) < float(df["Open"].iloc[-1])
-                        and last < prev and chg < 0):
+                # הוגדר עבור השורט: רצף של שני ימי סגירה שליליים ו-RSI מעל 30
+                close_1 = float(close.iloc[-1])
+                close_2 = float(close.iloc[-2])
+                close_3 = float(close.iloc[-3])
+                
+                two_consecutive_down = (close_1 < close_2) and (close_2 < close_3)
+                
+                if (rsi > 30 and two_consecutive_down and vol > 1_000_000
+                        and float(close.iloc[-1]) < float(df["Open"].iloc[-1])):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -270,19 +278,16 @@ def analyze_ticker(ticker):
     try:
         session = get_session()
         t = yf.Ticker(ticker, session=session)
-        df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
-        
-        if df.empty or len(df) < 200:
-            t = yf.Ticker(ticker)
-            df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
+        df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
-        if df.empty or len(df) < 200:
+        if df.empty or len(df) < 20:
             return None
             
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
         last  = float(close.iloc[-1])
         prev  = float(close.iloc[-2])
+        chg   = round(((last - prev) / prev) * 100, 2)
         rsi   = calculate_rsi(close)
         
         if rsi > 70:
@@ -292,12 +297,13 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        ma100_series = close.rolling(100).mean()
-        ma200_series = close.rolling(200).mean()
+        # מילוי חסרים אוטומטי למקרה שלמניה אין 200 ימי היסטוריה
+        ma100_series = close.rolling(100).mean().fillna(method='bfill').fillna(last)
+        ma200_series = close.rolling(200).mean().fillna(method='bfill').fillna(last)
         
         above_all = True
         below_all = True
-        for j in range(1, 4):
+        for j in range(1, min(4, len(close))):
             c_val = float(close.iloc[-j])
             if not (c_val > float(ma100_series.iloc[-j]) and c_val > float(ma200_series.iloc[-j])):
                 above_all = False
@@ -318,8 +324,6 @@ def analyze_ticker(ticker):
         options_text = f"רוב אופציות קול ({calls_ratio}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100-calls_ratio:.1f}%)"
 
         try:
-            calendar = t.calendar
-            earnings_history = t.get_shares_full() 
             revenue_growth = info.get("revenueGrowth", 0.05)
             if revenue_growth > 0:
                 earnings_text = "עמדה בכל התחזיות בשנה האחרונה 4/4"
@@ -347,7 +351,6 @@ def analyze_ticker(ticker):
 
         recommendation = info.get("recommendationKey", "buy")
         target_mean = info.get("targetMeanPrice", last)
-        analyst_count = info.get("numberOfAnalystOpinions", 30)
         
         if recommendation in ["buy", "strong_buy"]:
             rec_pct = round(72.0 + (last/target_mean if target_mean else 1)*10 + random.uniform(-2,2), 1)
@@ -366,13 +369,14 @@ def analyze_ticker(ticker):
             rec_badge = "אחזקה"
             rec_pos = None
 
-        up = last > float(close.rolling(9).mean().iloc[-1])
+        ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
+        up = last > ma9_val
         trend_status = "שורי (דומיננטיות קונים ברורה)" if up else "דובי (לחץ מוכרים מוגבר)"
         
         formatted_opinion = (
             f"🎯 <b>מסקנה אנליטית:</b> מניית {ticker} נמצאת כעת במבנה מחירים <b>{trend_status}</b> בטווח הקצר המיידי.<br/>"
             f"📊 <b style='color:#c9a84c;'>מצב המתנדים:</b> מדד ה-RSI עומד על {rsi:.1f} המייצג סביבה תנודתית, כאשר נפח המסחר משקף מעורבות מוסדית.<br/>"
-            f"🌐 <b style='color:#c9a84c;'>טווח ארוך (מאקרו):</b> נכס הבסיס נסחר במגמה של <b>{ma_status}</b> ביחס לממוצעים 100 ו-200 ימים בשלושת ימי המסחר האחרונים."
+            f"🌐 <b style='color:#c9a84c;'>טווח ארוך (מאקרו):</b> נכס הבסיס נסחר במגמה של <b>{ma_status}</b> ביחס לממוצעים 100 ו-200 ימים."
         )
         
         return {
@@ -397,7 +401,7 @@ def analyze_ticker(ticker):
             "momentum":   "עולה" if up else "יורד",
             "summary_text": formatted_opinion
         }
-    except:
+    except Exception as e:
         return None
 
 def render_cards(data, mode):
@@ -534,7 +538,6 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .mrow-dn{{font-size:0.72rem;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.1);padding:2px 7px;border-radius:2px}}
 .quote-strip{{background:#c9a84c;padding:22px 40px;text-align:center}}
 .quote-text{{font-family:'Playfair Display',serif;font-size:1.1rem;font-style:italic;font-weight:700;color:#0a0a08}}
-.quote-src{{font-size:0.7rem;font-weight:600;letter-spacing:0.1em;color:rgba(10,10,8,0.5);margin-top:6px;text-transform:uppercase}}
 .modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(12px)}}
 .modal-overlay.open{{display:flex}}
 .modal{{background:#141410;border:1px solid rgba(201,168,76,0.12);border-radius:4px;padding:40px;max-width:440px;width:90%;text-align:center}}
@@ -583,8 +586,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   </div>
 </section>
 <div class="quote-strip">
-  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות"</div>
-  <div class="quote-src">— Warren Buffett</div>
+  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות" &nbsp; — וורן באפט</div>
 </div>
 <script>
 const QUOTES  = {quotes_json};
@@ -627,7 +629,8 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["📈 רדאר לונג", "📉 רדאר שורט", "🤖 ניתוח AI", "📊 מדד הפחד והגרידיות"])
+# שינוי האימוג'ים לצד שמאל (בגלל שהעמוד מימין לשמאל - כשהאימוג'י בסוף המחרוזת הוא יופיע משמאל)
+tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
 
 # ── טאב לונג ──
 with tab_long:
@@ -697,7 +700,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת (יומיים ברצף)</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
@@ -757,7 +760,12 @@ with tab_ai:
         if st.button("נתח מניה", key="analyze_trigger"):
             if ticker_val:
                 with st.spinner("מחלץ נתוני שוק חיים מהאינטרנט..."):
-                    st.session_state.analysis = analyze_ticker(ticker_val.upper().strip())
+                    res = analyze_ticker(ticker_val.upper().strip())
+                    if res:
+                        st.session_state.analysis = res
+                    else:
+                        st.session_state.analysis = None
+                        st.error("לא ניתן היה למשוך נתונים עבור סימול זה. ייתכן שאין לו מספיק היסטוריה קיימת או שהסימול שגוי.")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if st.session_state.analysis:
@@ -770,7 +778,7 @@ with tab_ai:
   <div class="panel-title">שאלות כלליות</div>
   <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
 </div>""", unsafe_allow_html=True)
-        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה RSI? איך לזהות פריצה?", label_visibility="collapsed")
+        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה מחזור? איך לזהות תמיכה?", label_visibility="collapsed")
         st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
         if st.button("שאל", key="qa_trigger"):
@@ -809,21 +817,30 @@ with tab_ai:
                         "📊 <b>ניתוח טכני ומסקנת מסחר:</b> תעודת הסל נסחרת ב-3 ימי המסחר האחרונים בצורה עקבית מעל ממוצעים נעים 100 ו-200 ימים המשקפים מגמת מאקרו שורית ארוכת טווח. מדד ה-RSI עומד על רמת 61 מאוזנת המעידה על המשכיות מומנטום קונים בריא, המצדיק עסקאות <b>לונג (Long)</b> בתיקונים טכניים קצרים."
                     )
                 
-                # ב. ניתוח דינמי ומענה מדויק לכל שאלה כללית בשוק ההון
-                elif any(word in q for word in ["ממוצע", "ma9", "ma200", "נע"]):
-                    st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת כדי לזהות מגמה ולסנן רעשי שוק זמניים.<br/>• ממוצעים קצרים (כמו MA9) מגיבים מהר ומשמשים לזיהוי מומנטום מיידי וכניסות סווינג מהירות.<br/>• ממוצעים ארוכים (כמו MA100 ו-MA200) מייצגים את מגמת המאקרו הראשית של השוק - מסחר מעליהם ב-3 ימי המסחר האחרונים מאותת על מבנה שורי (לונג), ומסחר מתחתיהם על מבנה דובי (שורט). הפקודה משמשת גם כרמת תמיכה והתנגדות דינמית."
-                elif "rsi" in q or "מתנד" in q or "עוצמה" in q:
-                    st.session_state.ai_answer = "<b>הסבר על מדד ה-RSI (Relative Strength Index):</b> מתנד טכני המודד את עוצמת ומהירות שינויי המחירים בסולם של 0 עד 100.<br/>• מעל רמת 70 הנכס מוגדר ב'קניית יתר' (Overbought), מה שמצביע על סיכון למתיחת הגרף וסימון <b>זמן למכור</b> או לקחת רווחים.<br/>• מתחת לרמת 30 הנכס מוגדר ב'מכירת יתר' (Oversold), מה שמצביע על פאניקה וסימון <b>זמן לקנות</b> באזורי בלימה ותחתית. בין 30 ל-70 המצב מוגדר כנייטרלי ומאוזן."
-                elif "פריצה" in q or "התנגדות" in q or "תמיכה" in q:
-                    st.session_state.ai_answer = "<b>הסבר על פריצה טכנית ותמיכה:</b> פריצה (Breakout) מתרחשת כאשר המחיר חוצה רמת התנגדות אופקית קשיחה בליווי נפחי מסחר (Volume) גבוהים, המעידים על כניסת כסף גדול של מוסדיים לשוק.<br/>• פריצה מוכחת מתרחשת כאשר הנר היומי נסגר מעל הרמה, מה שהופך את ההתנגדות הישנה לשמש כרמת תמיכה חדשה.<br/>• פריצות שווא (Fakeouts) נפוצות כאשר נפח המסחר נמוך - המחיר עולה זמנית מעל הרמה אך קורס חזרה למטה בשל חוסר עניין של קונים."
-                elif "שורט" in q or "חסר" in q:
-                    st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות בשוק. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה הנוכחי, ושואף לקנות אותן בחזרה במחיר נמוך יותר בעתיד.<br/>• הרווח הוא הפרש השערים בין המכירה לקנייה החוזרת. פרופיל הסיכון בשורט הוא תיאורטית אינסופי מכיוון שמניה יכולה לעלות ללא הגבלה, ולכן שימוש בפקודות הגנה וקטיעת הפסד (Stop Loss) הוא קריטי והכרחי לשמירה על התיק."
-                elif "אופציות" in q or "קול" in q or "פוט" in q:
-                    st.session_state.ai_answer = "<b>הסבר על שוק האופציות והנגזרים:</b> אופציות הן מכשירים פיננסיים המעניקים זכות לקנות או למכור נכס בסיס בשער קבוע מראש ובזמן מוגדר.<br/>• אופציית Call (קול) מייצגת סנטימנט שורי והימור על עליות מחירים; אופציית Put (פוט) מייצגת סנטימנט דובי והימור על ירידות או הגנה על התיק.<br/>• ניתוח יחס הפעילות (Put/Call Ratio) משמש כאינדיקטור סנטימנט מוביל בשוק - רוב של חוזי קול מעיד על אופטימיות, ורוב של פוט על פחד ופסימיות."
+                # ב. הרחבת הניתוח הדינמי והגמשה של זיהוי שאלות כלליות
+                elif any(word in q for word in ["מחזור", "ווליום", "volume"]):
+                    st.session_state.ai_answer = "<b>הסבר על נפח מסחר (Volume):</b> נפח המסחר מציין את כמות המניות שהחליפו ידיים במהלך יום המסחר. מחזור גבוה מעיד על כניסת כסף מוסדי ומאשרר תנועות במחיר (כמו פריצה או שבירה), בעוד מחזור נמוך מצביע על חוסר עניין ועלול להעיד על פריצת שווא."
+                elif any(word in q for word in ["נר", "נרות", "יפני", "פטיש", "עוקר"]):
+                    st.session_state.ai_answer = "<b>הסבר על נרות יפניים:</b> שיטת תצוגה המציגה את התנהגות המחיר (פתיחה, סגירה, גבוה, נמוך) בפרק זמן מסוים. צורת הנר מרמזת על מאבק הכוחות בין הקונים למוכרים ויכולה לאותת על היפוך מגמה או המשכיות. נר ירוק מסמן סגירה מעל הפתיחה, ונר אדום מסמן להפך."
+                elif any(word in q for word in ["מגמה", "טרנד"]):
+                    st.session_state.ai_answer = "<b>הסבר על מגמה (Trend):</b> הכיוון הכללי של השוק או המניה. מגמה עולה (שורית) מורכבת משיאים ושפלים עולים, בעוד מגמה יורדת (דובית) מורכבת משיאים ושפלים יורדים. הכלל הבסיסי במסחר הוא לסחור עם כיוון המגמה (Trend is your friend)."
+                elif any(word in q for word in ["ממוצע", "ma9", "ma100", "ma200", "נע", "ממוצעים"]):
+                    st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת.<br/>• ממוצעים קצרים (כמו MA9) מגיבים מהר ומשמשים לזיהוי מומנטום מיידי.<br/>• ממוצעים ארוכים (כמו MA100 ו-MA200) מייצגים את מגמת המאקרו של השוק. הפקודה משמשת גם כרמת תמיכה והתנגדות דינמית."
+                elif any(word in q for word in ["rsi", "מתנד", "עוצמה"]):
+                    st.session_state.ai_answer = "<b>הסבר על מדד ה-RSI (Relative Strength Index):</b> מתנד טכני המודד את עוצמת שינויי המחירים בסולם של 0 עד 100.<br/>• מעל 70 הנכס ב'קניית יתר' (Overbought), מה שמצביע על סיכון ומסמן לרוב <b>זמן למכור</b>.<br/>• מתחת ל-30 הנכס ב'מכירת יתר' (Oversold), מה שמצביע על פאניקה וסימון <b>זמן לקנות</b> באזורי בלימה."
+                elif any(word in q for word in ["פריצה", "התנגדות", "תמיכה", "לזהות"]):
+                    st.session_state.ai_answer = "<b>הסבר על תמיכה והתנגדות:</b> רמת תמיכה היא אזור מחירים בו יש ריכוז של קונים (הרצפה), ורמת התנגדות היא אזור בו יש ריכוז מוכרים (התקרה). פריצה (Breakout) מתרחשת כאשר המחיר חוצה רמת התנגדות או תמיכה בליווי נפחי מסחר גבוהים, מה שמעיד על המשכיות המהלך המיועד."
+                elif any(word in q for word in ["שורט", "חסר"]):
+                    st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה הנוכחי, ושואף לקנות אותן בחזרה במחיר נמוך יותר בעתיד. חובה להשתמש בפקודות הגנה כיוון שההפסד עשוי להיות בלתי מוגבל."
+                elif any(word in q for word in ["אופציות", "קול", "פוט", "call", "put"]):
+                    st.session_state.ai_answer = "<b>הסבר על שוק האופציות והנגזרים:</b> אופציות מעניקות זכות לקנות או למכור נכס בסיס בשער קבוע מראש.<br/>• אופציית Call (קול) מייצגת הימור על עליות מחירים.<br/>• אופציית Put (פוט) מייצגת הימור על ירידות או הגנה על התיק.<br/>• ניתוח יחס הפעילות משמש כאינדיקטור סנטימנט מוביל."
                 else:
+                    # תשובה ברורה למקרה של שאלה שלא נמצאה
                     st.session_state.ai_answer = (
-                        f"<b>תשובה ממוקדת לשאלתך בנושא השקעות ושוק ההון:</b> פנייתך לגבי '{qa_val}' נבחנה במערכת האנליטית דרך ניתוח המגמה והסנטימנט החי בבורסה.<br/>"
-                        f"במסחר מקצועי, כל החלטה להשקעה אסטרטגית מבוססת על שילוב של שלושה פרמטרים מרכזיים: זיהוי מבנה המחירים של הנכס ביחס לממוצעים הנעים המרכזיים שלו, בדיקת רמות התנודתיות והמומנטום באמצעות מדד ה-RSI (כדי לוודא שאינך רוכש נכס בשיא קניית היתר או מוכר במכירת יתר קיצונית), ובחינת נפחי המסחר (Volume) המעידים על עוצמת המהלך. מומלץ למקד את השאלה במונחים כמו RSI, ממוצעים, שורט, לונג, אופציות או פריצה לקבלת פלט אלגוריתמי מלא."
+                        "<b>לא זוהו מילות מפתח מוכרות במאגר.</b><br/><br/>"
+                        f"המערכת מתוכנתת להשיב על מושגי יסוד מרכזיים בניתוח טכני כדי לשמור על מקצועיות ומיקוד. נסה לשלב בשאלתך אחד מהמונחים הבאים: "
+                        "<b>RSI, ממוצעים, שורט, לונג, תמיכה, התנגדות, מחזור (ווליום), נרות, אופציות, או פריצה.</b><br/>"
+                        "לחלופין, להערכת חברה ספציפית הזן רק את שמה (לדוגמה: 'אפל' או 'אנבידיה') לקבלת ניתוח מובנה."
                     )
                     
         st.markdown('</div>', unsafe_allow_html=True)
@@ -844,26 +861,20 @@ with tab_fear_greed:
     
     col_img, col_txt = st.columns([1, 1])
     with col_img:
-        # הקוד מיושר לשמאל (ללא הזחות) כדי ש-Streamlit לא יפרש אותו כבלוק קוד בטעות!
         html_gauge = f"""<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
-<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
-<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
-<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
-<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
-<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
