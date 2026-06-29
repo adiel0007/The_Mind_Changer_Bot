@@ -8,8 +8,7 @@ import os
 import contextlib
 
 # המפתח שלך מוזן כאן בפנים
-GEMINI_API_KEY = "AQ.Ab8RN6IXPR-4I1jtU1h79sHrYDu9WAk9qIbsuuhtQNSlkA74WA" 
-
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 try:
     import google.generativeai as genai
     GENAI_AVAILABLE = True
