@@ -8,7 +8,7 @@ import os
 import contextlib
 
 # הוספת תמיכה ב-Gemini API לשאלות חופשיות
-GEMINI_API_KEY = "" # השם כאן את מפתח ה-API שלך כדי לקבל תשובות AI חכמות
+GEMINI_API_KEY = "AQ.Ab8RN6IXPR-4I1jtU1h79sHrYDu9WAk9qIbsuuhtQNSlkA74WA" # השם כאן את מפתח ה-API שלך כדי לקבל תשובות AI חכמות
 try:
     import google.generativeai as genai
     GENAI_AVAILABLE = True
