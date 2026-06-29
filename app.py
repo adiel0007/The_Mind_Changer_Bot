@@ -286,11 +286,12 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        t = yf.Ticker(ticker)
+        session = get_session()
+        t = yf.Ticker(ticker, session=session)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
         if df.empty or len(df) < 30:
-            df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            df = yf.download(ticker, period="1y", interval="1d", progress=False, session=session)
             if not df.empty and isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
 
@@ -330,56 +331,44 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת נתוני דוחות ופונדמנטלס (מנגנון משולש לעקיפת חסימות יאהו) ---
         info = {}
         try:
             info = t.info if hasattr(t, 'info') and t.info else {}
         except Exception:
             pass
 
+        # --- משיכת נתוני דוחות ופונדמנטלס (הפתעות רווח EPS - Hit/Miss Ratio) ---
         earnings_text = "אין נתונים מספיקים להערכה"
         earnings_badge = "לא זמין"
         earnings_pos = None
 
-        q_growth = info.get("earningsQuarterlyGrowth")
-        if q_growth is not None:
-            val = round(q_growth * 100, 1)
-            if val > 0:
-                earnings_text = f"צמיחה רבעונית ברווחים של {val}%"
-                earnings_badge = "צמיחה"
-                earnings_pos = True
-            else:
-                earnings_text = f"נסיגה רבעונית ברווחים של {abs(val)}%"
-                earnings_badge = "נסיגה"
-                earnings_pos = False
-        else:
-            eps_trail = info.get('trailingEps')
-            eps_forw = info.get('forwardEps')
-            if eps_trail is not None and eps_forw is not None:
-                if eps_forw >= eps_trail:
-                    earnings_text = f"תחזית צמיחה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "צמיחה עתידית"
-                    earnings_pos = True
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                if ed.index.tz is None:
+                    ed.index = ed.index.tz_localize('UTC')
                 else:
-                    earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "ירידה עתידית"
-                    earnings_pos = False
-            else:
-                try:
-                    inc = t.quarterly_income_stmt
-                    if not inc.empty and "Net Income" in inc.index:
-                        ni = inc.loc["Net Income"].dropna()
-                        if len(ni) >= 2:
-                            if ni.iloc[0] > ni.iloc[1]:
-                                earnings_text = "שיפור ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "שיפור"
-                                earnings_pos = True
-                            else:
-                                earnings_text = "הרעה ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "הרעה"
-                                earnings_pos = False
-                except:
-                    pass
+                    ed.index = ed.index.tz_convert('UTC')
+                
+                now_utc = pd.Timestamp.utcnow()
+                past_ed = ed[ed.index < now_utc].head(4)
+                
+                beats = 0
+                total_q = 0
+                for idx, row in past_ed.iterrows():
+                    rep = row.get('Reported EPS')
+                    est = row.get('EPS Estimate')
+                    if pd.notna(rep) and pd.notna(est):
+                        total_q += 1
+                        if rep >= est:
+                            beats += 1
+                
+                if total_q > 0:
+                    earnings_text = f"עקפה תחזיות רווח ב-{beats} מתוך {total_q} הרבעונים האחרונים"
+                    earnings_badge = f"{beats}/{total_q}"
+                    earnings_pos = (beats >= total_q / 2)
+        except Exception:
+            pass
 
         # --- אופציות אמת מהבורסה ---
         options_text = "אין נתוני אופציות"
@@ -414,29 +403,42 @@ def analyze_ticker(ticker):
             forecast_text = "אין תחזית הכנסות זמינה"
             forecast_pos = None
 
-        # --- המלצות אנליסטים אמת ---
-        rec_key = info.get("recommendationKey")
-        num_analysts = info.get("numberOfAnalystOpinions")
+        # --- המלצות אנליסטים אמת (כולל חישוב אחוזים) ---
+        rec_key = info.get("recommendationKey", "")
+        rec_text = "אין המלצות אנליסטים"
+        rec_badge = "לא זמין"
+        rec_pos = None
         
-        if rec_key and rec_key != "none":
-            hebrew_rec = {
-                "strong_buy": "קנייה חזקה",
-                "buy": "קנייה",
-                "hold": "אחזקה",
-                "sell": "מכירה",
-                "strong_sell": "מכירה חזקה",
-                "underperform": "תשואת חסר",
-                "outperform": "תשואת יתר"
-            }
-            translated_rec = hebrew_rec.get(rec_key, rec_key.replace('_', ' ').title())
-            analyst_text = f"מבוסס על {num_analysts} אנליסטים" if num_analysts else "קונצנזוס"
-            rec_text = f"המלצה: {translated_rec} ({analyst_text})"
-            rec_badge = translated_rec
-            rec_pos = rec_key in ["buy", "strong_buy", "outperform"]
-        else:
-            rec_text = "אין המלצות אנליסטים"
-            rec_badge = "לא זמין"
-            rec_pos = None
+        try:
+            recs = t.recommendations
+            if recs is not None and not recs.empty:
+                latest = recs.iloc[0]
+                sb = int(latest.get('strongBuy', 0))
+                b = int(latest.get('buy', 0))
+                h = int(latest.get('hold', 0))
+                s = int(latest.get('sell', 0))
+                ss = int(latest.get('strongSell', 0))
+                
+                total_analysts = sb + b + h + s + ss
+                if total_analysts > 0:
+                    buy_pct = ((sb + b) / total_analysts) * 100
+                    
+                    hebrew_rec = {
+                        "strong_buy": "קנייה חזקה",
+                        "buy": "קנייה",
+                        "hold": "אחזקה",
+                        "sell": "מכירה",
+                        "strong_sell": "מכירה חזקה",
+                        "underperform": "תשואת חסר",
+                        "outperform": "תשואת יתר"
+                    }
+                    translated_rec = hebrew_rec.get(rec_key, "קנייה" if buy_pct > 50 else "אחזקה")
+                    
+                    rec_text = f"המלצה: {translated_rec} ({buy_pct:.0f}% קנייה מתוך {total_analysts} אנליסטים)"
+                    rec_badge = translated_rec
+                    rec_pos = buy_pct >= 50
+        except Exception:
+            pass
 
         ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
         up = last > ma9_val
@@ -866,7 +868,7 @@ with tab_ai:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
-                            # פנייה ישירה ונקייה למודל ה-Flash העדכני. אין גיבויים למודלים ישנים.
+                            # פנייה למודל נקי וללא קידומת שעשתה שגיאות
                             model = genai.GenerativeModel('gemini-1.5-flash')
                             response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
                             st.session_state.ai_answer = response.text
