@@ -7,8 +7,12 @@ import requests
 import os
 import contextlib
 
-# המפתח שלך מוזן כאן בפנים
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+# משיכת המפתח מתוך הסודות של Streamlit או מקומית מ-secrets.toml
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    GEMINI_API_KEY = "הכנס_כאן_את_המפתח_החדש"
+
 try:
     import google.generativeai as genai
     GENAI_AVAILABLE = True
@@ -240,7 +244,8 @@ def do_scan(mode):
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
-            if df.empty or len(df) < 50:
+            
+            if df.empty or len(df) < 30:
                 continue
             
             df = df.dropna(subset=["Close", "Open", "Volume"])
@@ -259,14 +264,12 @@ def do_scan(mode):
             chg   = round(((last - prev) / prev) * 100, 2)
             
             if mode == "long":
-                # נפסל אם המניה נסחרת בו זמנית מעל ממוצעים 9, 100 ו-200 למניעת מתיחת יתר
                 if (last > ma9 and prev > ma9_prev and rsi < 70 and vol > 1_000_000
                         and not (last > ma100 and last > ma200 and last > ma9)
                         and float(close.iloc[-1]) > float(df["Open"].iloc[-1])
                         and last > prev and chg > 0):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                # איתות שורט רק כשה-RSI מעל 30 ויש שני ימי סגירה שליליים ברצף
                 close_1 = float(close.iloc[-1])
                 close_2 = float(close.iloc[-2])
                 close_3 = float(close.iloc[-3])
@@ -283,15 +286,15 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        session = get_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
-        if df.empty or len(df) < 20:
-            t = yf.Ticker(ticker)
-            df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
-            
-        if df.empty or len(df) < 20:
+        if df.empty or len(df) < 30:
+            df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            if not df.empty and isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+        if df.empty or len(df) < 30:
             return None
             
         df = df.dropna(subset=["Close", "Open", "Volume"])
@@ -308,7 +311,6 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        # מילוי ממוצעים חסרים מתמטית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -802,27 +804,31 @@ with tab_ai:
             if qa_val:
                 q = qa_val.strip()
                 
-                # בדיקה האם הספרייה מותקנת פיזית במחשב שלך
-                if not GENAI_AVAILABLE:
+                if not GENAI_AVAILABLE or GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
                     st.session_state.ai_answer = (
-                        "<b>⚠️ חסרה ספרייה בסביבת הפיתוח שלך!</b><br/><br/>"
-                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל, עליך להתקין את החבילה הרשמית. "
-                        "אנא פתח את חלון הפקודות (Terminal) והרץ את הפקודה הבאה:<br/><br/>"
-                        "<code style='direction:ltr; display:block; background:rgba(220,38,38,0.1); color:#dc2626; padding:10px; border-radius:4px; text-align:left; font-size:1rem; border:1px solid rgba(220,38,38,0.3);'>"
-                        "pip install google-generativeai"
-                        "</code><br/>"
-                        "לאחר שההתקנה תסתיים, כבה את האפליקציה והפעל אותה מחדש (<code>streamlit run app.py</code>)."
+                        "<b>⚠️ חיבור חסר למערכת ה-AI:</b><br/><br/>"
+                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל ולענות על שאלות חופשיות, עליך לבצע שני שלבים קצרים:<br/>"
+                        "1. להתקין את הספרייה על ידי הרצת הפקודה <code>pip install google-generativeai</code> ב-Terminal.<br/>"
+                        "2. להדביק את מפתח ה-API החוקי שלך (שמתחיל ב-AIzaSy) בשורה 12 בקוד.<br/><br/>"
+                        "<i>(עד אז, המערכת תספק תשובות בסיסיות רק למונחים כמו RSI, שורט או ממוצעים).</i>"
                     )
                 else:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            prompt = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
-                            response = model.generate_content(prompt)
+                            # מנגנון הגנה חכם למעבר למודל חלופי אם המודל הראשי נחסם או לא זמין
+                            try:
+                                model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                                response = model.generate_content(prompt=f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
+                            except Exception as e:
+                                if "404" in str(e) or "not found" in str(e).lower():
+                                    model = genai.GenerativeModel('gemini-pro')
+                                    response = model.generate_content(prompt=f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
+                                else:
+                                    raise e
                             st.session_state.ai_answer = response.text
                         except Exception as e:
-                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}<br/>ייתכן שיש חסימת רשת או שמפתח ה-API הוגבל."
+                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
                     
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -846,16 +852,21 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
+<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
