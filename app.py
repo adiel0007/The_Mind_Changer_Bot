@@ -98,12 +98,14 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     border-bottom-color: #c9a84c !important;
 }}
 
+/* עיצוב מעודכן לכל הכפתורים - טקסט שחור ובולט */
 div.stButton > button {{
     width: 100% !important;
     padding: 11px !important;
     border-radius: 0 0 4px 4px !important;
     font-size: 0.78rem !important;
-    font-weight: 700 !important;
+    font-weight: 900 !important; /* הדגשה מקסימלית */
+    color: #000000 !important;   /* שחור חזק לכל הכפתורים הפעילים */
     letter-spacing: 0.08em;
     text-transform: uppercase;
     cursor: pointer !important;
@@ -113,9 +115,10 @@ div.stButton > button {{
 }}
 div.stButton > button:hover {{ opacity: 0.88 !important; }}
 
-.long-btn div[data-testid="stButton"] button {{ background-color: #16a34a !important; color: white !important; }}
-.short-btn div[data-testid="stButton"] button {{ background-color: #dc2626 !important; color: white !important; }}
-.gold-btn div[data-testid="stButton"] button {{ background-color: #c9a84c !important; color: #0a0a08 !important; }}
+.long-btn div[data-testid="stButton"] button {{ background-color: #16a34a !important; color: #000000 !important; }}
+.short-btn div[data-testid="stButton"] button {{ background-color: #dc2626 !important; color: #000000 !important; }}
+.gold-btn div[data-testid="stButton"] button {{ background-color: #c9a84c !important; color: #000000 !important; }}
+.stop-btn div[data-testid="stButton"] button {{ background-color: #9ca3af !important; color: #000000 !important; border: 1px solid #4b5563 !important; }}
 
 div[data-testid="stTextInput"] input {{
     background-color: #141410 !important;
@@ -717,11 +720,22 @@ with tab_long:
     <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="long-btn">', unsafe_allow_html=True)
-        if st.button("התחל סריקת לונג ⚡", key="run_long_trigger"):
-            st.session_state.long_results = do_scan("long")
-        st.markdown('</div>', unsafe_allow_html=True)
         
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            st.markdown('<div class="long-btn">', unsafe_allow_html=True)
+            run_long = st.button("התחל סריקת לונג ⚡", key="run_long_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with btn_col2:
+            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+            stop_long = st.button("עצור 🛑", key="stop_long_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if stop_long:
+            st.stop()
+        if run_long:
+            st.session_state.long_results = do_scan("long")
+            
     with col2:
         long_count = f"{len(st.session_state.long_results)} מניות" if st.session_state.long_results is not None else "—"
         long_cards = render_cards(st.session_state.long_results, "long")
@@ -735,8 +749,19 @@ with tab_long:
 </div>""", unsafe_allow_html=True)
         
         if st.session_state.long_results:
-            st.markdown('<div class="filter-more-btn">', unsafe_allow_html=True)
-            if st.button("תסנן לי עוד ⚡", key="deep_filter_volume_trigger"):
+            f_col1, f_col2 = st.columns([3, 1])
+            with f_col1:
+                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+                run_deep_l = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with f_col2:
+                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+                stop_deep_l = st.button("עצור 🛑", key="stop_deep_l_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            if stop_deep_l:
+                st.stop()
+            if run_deep_l:
                 with st.spinner("מבצע סינון עומק מחזורי..."):
                     deep_filtered = []
                     session = get_session()
@@ -755,7 +780,6 @@ with tab_long:
                             pass
                     st.session_state.long_results = deep_filtered
                     st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
 # ── טאב שורט ──
 with tab_short:
@@ -774,11 +798,22 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
 </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="short-btn">', unsafe_allow_html=True)
-        if st.button("התחל סריקת שורט ⚡", key="run_short_trigger"):
-            st.session_state.short_results = do_scan("short")
-        st.markdown('</div>', unsafe_allow_html=True)
         
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            st.markdown('<div class="short-btn">', unsafe_allow_html=True)
+            run_short = st.button("התחל סריקת שורט ⚡", key="run_short_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with btn_col2:
+            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+            stop_short = st.button("עצור 🛑", key="stop_short_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if stop_short:
+            st.stop()
+        if run_short:
+            st.session_state.short_results = do_scan("short")
+            
     with col2:
         short_count = f"{len(st.session_state.short_results)} מניות" if st.session_state.short_results is not None else "—"
         short_cards = render_cards(st.session_state.short_results, "short")
@@ -792,8 +827,19 @@ with tab_short:
 </div>""", unsafe_allow_html=True)
         
         if st.session_state.short_results:
-            st.markdown('<div class="filter-more-short-btn">', unsafe_allow_html=True)
-            if st.button("תסנן לי עוד ⚡", key="deep_filter_volume_short_trigger"):
+            f_col1, f_col2 = st.columns([3, 1])
+            with f_col1:
+                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+                run_deep_s = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_short_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with f_col2:
+                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+                stop_deep_s = st.button("עצור 🛑", key="stop_deep_s_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            if stop_deep_s:
+                st.stop()
+            if run_deep_s:
                 with st.spinner("מבצע סינון עומק מחזורי..."):
                     deep_filtered_short = []
                     session = get_session()
@@ -801,7 +847,7 @@ with tab_short:
                         try:
                             ticker_sym = item["symbol"]
                             ticker_obj = yf.Ticker(ticker_sym, session=session)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_auto_adjust=True)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                             hist = hist.dropna(subset=["Volume"])
                             if len(hist) >= 20:
                                 avg_vol_3d = hist["Volume"].iloc[-3:].mean()
@@ -812,7 +858,6 @@ with tab_short:
                             pass
                     st.session_state.short_results = deep_filtered_short
                     st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
 # ── טאב ניתוח AI ──
 with tab_ai:
@@ -824,9 +869,20 @@ with tab_ai:
   <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
 </div>""", unsafe_allow_html=True)
         ticker_val = st.text_input("סימול מניה", placeholder="AAPL, TSLA, NVDA...", label_visibility="collapsed")
-        st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
-        if st.button("נתח מניה", key="analyze_trigger"):
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+            run_ai = st.button("נתח מניה", key="analyze_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with btn_col2:
+            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+            stop_ai = st.button("עצור 🛑", key="stop_ai_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if stop_ai:
+            st.stop()
+        if run_ai:
             if ticker_val:
                 ticker_clean = ticker_val.upper().strip()
                 with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
@@ -836,8 +892,7 @@ with tab_ai:
                     else:
                         st.session_state.analysis = None
                         st.error("לא ניתן היה למשוך נתונים עבור סימול זה. ייתכן שאין לו מספיק היסטוריה קיימת או שהסימול שגוי.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
+                        
         if st.session_state.analysis:
             analysis_html = render_analysis(st.session_state.analysis)
             st.markdown(analysis_html, unsafe_allow_html=True)
@@ -849,9 +904,20 @@ with tab_ai:
   <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
 </div>""", unsafe_allow_html=True)
         qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="כמה כסף זה ב-3 שנים אם אני משקיע...", label_visibility="collapsed")
-        st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
-        if st.button("שאל", key="qa_trigger"):
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+            run_qa = st.button("שאל", key="qa_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with btn_col2:
+            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+            stop_qa = st.button("עצור 🛑", key="stop_qa_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if stop_qa:
+            st.stop()
+        if run_qa:
             if qa_val:
                 q = qa_val.strip()
                 
@@ -866,7 +932,6 @@ with tab_ai:
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
                             
-                            # לוגיקה חכמה ובלתי ניתנת לקריסה ששואבת את הרשימה המדויקת שפתוחה אישית למפתח שלך
                             available_models = []
                             for m in genai.list_models():
                                 if 'generateContent' in m.supported_generation_methods:
@@ -875,7 +940,6 @@ with tab_ai:
                             if not available_models:
                                 st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
                             else:
-                                # בחירת המודל מתוך מה שגוגל מאשרת בפועל לאותו רגע
                                 chosen_model = available_models[0]
                                 for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
                                     if preferred in available_models:
@@ -889,9 +953,7 @@ with tab_ai:
                                 
                         except Exception as e:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
-                    
-        st.markdown('</div>', unsafe_allow_html=True)
-        
+                            
         if st.session_state.ai_answer:
             st.markdown(f"""
 <div class="ai-response-box" style="margin-top:12px; min-height: 160px; border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; background: #11110e;">
@@ -922,7 +984,7 @@ with tab_fear_greed:
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
-<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
+<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
 </div>
@@ -936,7 +998,7 @@ with tab_fear_greed:
         html_text = """<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
 <h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
 <p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
-מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי במניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
 </p>
 <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
 <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
@@ -955,8 +1017,20 @@ with tab_market_dir:
   <div class="panel-sub">סריקה וניתוח משולב של מדד הנאסד"ק לאיתור מגמת השוק וסינון עסקאות</div>
 </div>""", unsafe_allow_html=True)
     
-    st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
-    if st.button("התחל ניתוח נאסד\"ק 🚀", key="analyze_qqq_btn"):
+    btn_col1, btn_col2 = st.columns([3, 1])
+    with btn_col1:
+        st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+        run_qqq = st.button("התחל ניתוח נאסד\"ק 🚀", key="analyze_qqq_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with btn_col2:
+        st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+        stop_qqq = st.button("עצור 🛑", key="stop_qqq_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if stop_qqq:
+        st.stop()
+        
+    if run_qqq:
         with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
             try:
                 qqq = yf.Ticker("QQQ")
@@ -1066,7 +1140,6 @@ with tab_market_dir:
                     
             except Exception as e:
                 st.error("אירעה שגיאה בניתוח המדד. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע.")
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
