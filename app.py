@@ -7,6 +7,14 @@ import requests
 import os
 import contextlib
 
+# הוספת תמיכה ב-Gemini API לשאלות חופשיות
+GEMINI_API_KEY = "" # השם כאן את מפתח ה-API שלך כדי לקבל תשובות AI חכמות
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
 # ── ה-CSS המקורי של הפאנלים והעיצוב הכללי ──
@@ -53,7 +61,7 @@ body{background:#0a0a08;color:var(--text);font-family:'Inter',sans-serif;directi
 .metric-value{font-size:0.73rem;color:var(--muted2);font-weight:600;text-align:left}
 .ai-response-box{margin-top:12px;padding:15px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.12);border-radius:3px;border-right:3px solid #c9a84c;}
 .ai-response-label{font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#c9a84c;text-transform:uppercase;margin-bottom:6px;text-align:right;}
-.ai-response-text{font-size:0.82rem;color:#9a8f7a;line-height:1.7;direction:rtl;text-align:right}
+.ai-response-text{font-size:0.82rem;color:#f0ede6;line-height:1.7;direction:rtl;text-align:right}
 """
 
 st.markdown(f"""
@@ -244,7 +252,6 @@ def do_scan(mode):
             ma9   = float(ma9_series.iloc[-1])
             ma9_prev = float(ma9_series.iloc[-2])
             
-            # הגנה מפני קריסה במניות ללא מספיק היסטוריה לממוצעים ארוכים
             ma100 = float(close.rolling(100).mean().iloc[-1]) if len(close) >= 100 else last
             ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else last
             
@@ -258,7 +265,6 @@ def do_scan(mode):
                         and last > prev and chg > 0):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                # הוגדר עבור השורט: רצף של שני ימי סגירה שליליים ו-RSI מעל 30
                 close_1 = float(close.iloc[-1])
                 close_2 = float(close.iloc[-2])
                 close_3 = float(close.iloc[-3])
@@ -276,9 +282,12 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        session = get_session()
-        t = yf.Ticker(ticker, session=session)
-        df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+        # הסרנו את ה-session כדי למנוע שגיאות 403 Forbidden במשיכה ישירה
+        t = yf.Ticker(ticker)
+        df = t.history(period="1y", interval="1d", auto_adjust=True)
+            
+        if df.empty or len(df) < 20:
+            df = t.history(period="max", interval="1d", auto_adjust=True)
             
         if df.empty or len(df) < 20:
             return None
@@ -297,7 +306,6 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        # מילוי חסרים אוטומטי למקרה שלמניה אין 200 ימי היסטוריה
         ma100_series = close.rolling(100).mean().fillna(method='bfill').fillna(last)
         ma200_series = close.rolling(200).mean().fillna(method='bfill').fillna(last)
         
@@ -317,7 +325,12 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        info = t.info if t.info else {}
+        # עטיפת משיכת ה-info ב-try/except כדי למנוע קריסה מלאה של המערכת בגלל שגיאות שרת ב-Yahoo
+        info = {}
+        try:
+            info = t.info if t.info else {}
+        except Exception:
+            pass
         
         calls_ratio = round(50 + (rsi - 50) * 0.5 + random.uniform(-2, 2), 1)
         calls_ratio = max(10.0, min(95.0, calls_ratio))
@@ -629,7 +642,6 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-# שינוי האימוג'ים לצד שמאל (בגלל שהעמוד מימין לשמאל - כשהאימוג'י בסוף המחרוזת הוא יופיע משמאל)
 tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
 
 # ── טאב לונג ──
@@ -783,65 +795,42 @@ with tab_ai:
         
         if st.button("שאל", key="qa_trigger"):
             if qa_val:
-                q = qa_val.strip().lower()
+                q = qa_val.strip()
                 
-                # א. בדיקת כוונת חיפוש מניה/מדד ישיר במשפט
-                if "טסלה" in q or "tsla" in q:
-                    st.session_state.ai_answer = (
-                        "<b>חברת טסלה (Tesla - TSLA):</b> חלוצת הרכבים החשמליים העולמית. ליבת רווחיה מגיעה ישירות ממכירת רכבים פרטיים ומסחריים, לצד הכנסות משלימות ממכירת קרדיטים סביבתיים (Regulatory Credits) ופעילות מסיבית בתחום אגירת האנרגיה והסוללות.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> מבחינה טכנית, המניה שומרת על מומנטום שורי בריא מעל ממוצע נע 9 ימים (MA9). מדד ה-RSI עומד על 58 (טריטוריה בריאה לחלוטין), מה שמצביע על מרחב עליות משמעותי ללא סיכון של קניית יתר, והופך תיקונים בגרף להזדמנויות כניסה לפוזיציית <b>לונג (Long)</b> מבוקרת."
-                    )
-                elif "אפל" in q or "aapl" in q:
-                    st.session_state.ai_answer = (
-                        "<b>חברת אפל (Apple - AAPL):</b> ענקית החומרה והתוכנה הגלובלית. רוב רווחיה של החברה מגיעים ישירות ממכירות סדרות הדגל של ה-iPhone, לצד צמיחה מסיבית בסעיף השירותים הדיגיטליים (App Store, iCloud) המניב שולי רווח גולמי גבוהים במיוחד.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> המניה נסחרת כעת במבנה <b>נייטרלי (Neutral)</b> בתוך רצועת דשדוש אופקית, כאשר ה-RSI עומד על 52 מאוזן. המחיר חופף לממוצע נע 100 ימים (MA100) ללא כיווניות מובהקת בנפחי המסחר, ומומלץ להמתין לפריצה ברורה מחוץ לגבולות התעלה לפני פתיחת פוזיציה."
-                    )
-                elif "אנבידיה" in q or "nvda" in q:
-                    st.session_state.ai_answer = (
-                        "<b>חברת אנבידיה (Nvidia - NVDA):</b> המובילה הבלתי מעורערת של תעשיית השבבים והמעבדים הגרפיים (GPUs). הרוב המוחלט של רווחיה הפנומנליים מגיע מחטיבת מרכזי הנתונים (Data Centers) המניעה את עולמות ה-AI ומחשוב הענן, לצד סקטור הגיימינג המסורתי.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> המניה נמצא במגמה פרבולית חזקה, אך מדד ה-RSI נושק לרמת 69 ומאותת על קניית יתר קיצונית. למרות המומנטום השורי הברור, רמת הסיכון המקומית גבוהה ולכן פוזיציית <b>לונג מומלצת רק בתיקונים (Pullbacks)</b> לעבר קו התמיכה של ה-MA9."
-                    )
-                elif "מיקרוסופט" in q or "msft" in q:
-                    st.session_state.ai_answer = (
-                        "<b>חברת מיקרוסופט (Microsoft - MSFT):</b> אימפריית תוכנה ומחשוב ענן ארגוני (Azure). רוב רווחיה של החברה מגיעים משירותי ענן מתקדמים ותוכנות מבוססות מנוי (SaaS), בשילוב הובלה משמעותית בשילוב כלי בינה מלאכותית (AI) במוצריה הדיגיטליים.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> הגרף ביצע פריצה טכנית איכותית מעל קו מגמה יורד בליווי נפחי מסחר (Volume) מתרחבים. נר הסגירה התבסס מעל ה-MA100 וה-RSI עולה לעבר 61, דבר המצביע על מומנטום שורי חזק ומצדיק כניסה לפוזיציית <b>לונג (Long)</b> לקראת בדיקה מחדש של שיאים קודמים."
-                )
-                elif "אינטל" in q or "intc" in q:
-                    st.session_state.ai_answer = (
-                        "<b>חברת אינטל (Intel - INTC):</b> יצרנית שבבים ותיקה הנמצאת בתהליך שינוי מבני למודל של קבלנות ייצור (Foundry). רוב רווחיה מגיעים ממכירת מעבדים למחשבים אישיים (PC) ושרתים, אך היא סובלת מאובדן נתח שוק משמעותי לטובת מתחרותיה.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> הגרף נמצא במגמה דובית חריפה ובמבנה <b>שורט (Short)</b> מובהק, כאשר המחיר נסחר ב-3 ימי המסחר האחרונים מתחת לממוצעים 100 ו-200 ימים. ה-RSI עומד על 32 (מכירת יתר), ומומלץ להימנע מכל פוזיציית לונג עד לקבלת בלימה מוכחת בגרף המחירים."
-                    )
-                elif "qqq" in q or "קיו" in q or "נאסדאק" in q:
-                    st.session_state.ai_answer = (
-                        "<b>מדד הנאסדאק (Invesco QQQ Trust):</b> קרן הסל העוקבת אחר 100 החברות הטכנולוגיות הגדולות בארה\"ב. רוב רווחי החברות במדד מגיעים מסקטורים טכנולוגיים מובהקים כמו תוכנה, שבבים, מחשוב ענן ובינה מלאכותית.<br/><br/>"
-                        "📊 <b>ניתוח טכני ומסקנת מסחר:</b> תעודת הסל נסחרת ב-3 ימי המסחר האחרונים בצורה עקבית מעל ממוצעים נעים 100 ו-200 ימים המשקפים מגמת מאקרו שורית ארוכת טווח. מדד ה-RSI עומד על רמת 61 מאוזנת המעידה על המשכיות מומנטום קונים בריא, המצדיק עסקאות <b>לונג (Long)</b> בתיקונים טכניים קצרים."
-                    )
+                # בדיקה האם הוכנס מפתח API של Gemini
+                if GEMINI_API_KEY and GENAI_AVAILABLE:
+                    with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
+                        try:
+                            genai.configure(api_key=GEMINI_API_KEY)
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            prompt = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
+                            response = model.generate_content(prompt)
+                            st.session_state.ai_answer = response.text
+                        except Exception as e:
+                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם Gemini:</b> {str(e)}<br/>אנא ודא שמפתח ה-API שלך תקין."
                 
-                # ב. הרחבת הניתוח הדינמי והגמשה של זיהוי שאלות כלליות
-                elif any(word in q for word in ["מחזור", "ווליום", "volume"]):
-                    st.session_state.ai_answer = "<b>הסבר על נפח מסחר (Volume):</b> נפח המסחר מציין את כמות המניות שהחליפו ידיים במהלך יום המסחר. מחזור גבוה מעיד על כניסת כסף מוסדי ומאשרר תנועות במחיר (כמו פריצה או שבירה), בעוד מחזור נמוך מצביע על חוסר עניין ועלול להעיד על פריצת שווא."
-                elif any(word in q for word in ["נר", "נרות", "יפני", "פטיש", "עוקר"]):
-                    st.session_state.ai_answer = "<b>הסבר על נרות יפניים:</b> שיטת תצוגה המציגה את התנהגות המחיר (פתיחה, סגירה, גבוה, נמוך) בפרק זמן מסוים. צורת הנר מרמזת על מאבק הכוחות בין הקונים למוכרים ויכולה לאותת על היפוך מגמה או המשכיות. נר ירוק מסמן סגירה מעל הפתיחה, ונר אדום מסמן להפך."
-                elif any(word in q for word in ["מגמה", "טרנד"]):
-                    st.session_state.ai_answer = "<b>הסבר על מגמה (Trend):</b> הכיוון הכללי של השוק או המניה. מגמה עולה (שורית) מורכבת משיאים ושפלים עולים, בעוד מגמה יורדת (דובית) מורכבת משיאים ושפלים יורדים. הכלל הבסיסי במסחר הוא לסחור עם כיוון המגמה (Trend is your friend)."
-                elif any(word in q for word in ["ממוצע", "ma9", "ma100", "ma200", "נע", "ממוצעים"]):
-                    st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת.<br/>• ממוצעים קצרים (כמו MA9) מגיבים מהר ומשמשים לזיהוי מומנטום מיידי.<br/>• ממוצעים ארוכים (כמו MA100 ו-MA200) מייצגים את מגמת המאקרו של השוק. הפקודה משמשת גם כרמת תמיכה והתנגדות דינמית."
-                elif any(word in q for word in ["rsi", "מתנד", "עוצמה"]):
-                    st.session_state.ai_answer = "<b>הסבר על מדד ה-RSI (Relative Strength Index):</b> מתנד טכני המודד את עוצמת שינויי המחירים בסולם של 0 עד 100.<br/>• מעל 70 הנכס ב'קניית יתר' (Overbought), מה שמצביע על סיכון ומסמן לרוב <b>זמן למכור</b>.<br/>• מתחת ל-30 הנכס ב'מכירת יתר' (Oversold), מה שמצביע על פאניקה וסימון <b>זמן לקנות</b> באזורי בלימה."
-                elif any(word in q for word in ["פריצה", "התנגדות", "תמיכה", "לזהות"]):
-                    st.session_state.ai_answer = "<b>הסבר על תמיכה והתנגדות:</b> רמת תמיכה היא אזור מחירים בו יש ריכוז של קונים (הרצפה), ורמת התנגדות היא אזור בו יש ריכוז מוכרים (התקרה). פריצה (Breakout) מתרחשת כאשר המחיר חוצה רמת התנגדות או תמיכה בליווי נפחי מסחר גבוהים, מה שמעיד על המשכיות המהלך המיועד."
-                elif any(word in q for word in ["שורט", "חסר"]):
-                    st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה הנוכחי, ושואף לקנות אותן בחזרה במחיר נמוך יותר בעתיד. חובה להשתמש בפקודות הגנה כיוון שההפסד עשוי להיות בלתי מוגבל."
-                elif any(word in q for word in ["אופציות", "קול", "פוט", "call", "put"]):
-                    st.session_state.ai_answer = "<b>הסבר על שוק האופציות והנגזרים:</b> אופציות מעניקות זכות לקנות או למכור נכס בסיס בשער קבוע מראש.<br/>• אופציית Call (קול) מייצגת הימור על עליות מחירים.<br/>• אופציית Put (פוט) מייצגת הימור על ירידות או הגנה על התיק.<br/>• ניתוח יחס הפעילות משמש כאינדיקטור סנטימנט מוביל."
                 else:
-                    # תשובה ברורה למקרה של שאלה שלא נמצאה
-                    st.session_state.ai_answer = (
-                        "<b>לא זוהו מילות מפתח מוכרות במאגר.</b><br/><br/>"
-                        f"המערכת מתוכנתת להשיב על מושגי יסוד מרכזיים בניתוח טכני כדי לשמור על מקצועיות ומיקוד. נסה לשלב בשאלתך אחד מהמונחים הבאים: "
-                        "<b>RSI, ממוצעים, שורט, לונג, תמיכה, התנגדות, מחזור (ווליום), נרות, אופציות, או פריצה.</b><br/>"
-                        "לחלופין, להערכת חברה ספציפית הזן רק את שמה (לדוגמה: 'אפל' או 'אנבידיה') לקבלת ניתוח מובנה."
-                    )
+                    # גיבוי (Fallback) למקרה שאין מפתח API מוזן במערכת
+                    q_lower = q.lower()
+                    if "טסלה" in q_lower or "tsla" in q_lower:
+                        st.session_state.ai_answer = "<b>חברת טסלה (TSLA):</b> חלוצת הרכבים החשמליים העולמית. ליבת רווחיה מגיעה ישירות ממכירת רכבים פרטיים ומסחריים, לצד הכנסות משלימות ממכירת קרדיטים סביבתיים (Regulatory Credits)."
+                    elif "אפל" in q_lower or "aapl" in q_lower:
+                        st.session_state.ai_answer = "<b>חברת אפל (AAPL):</b> ענקית החומרה והתוכנה הגלובלית. רוב רווחיה של החברה מגיעים ישירות ממכירות סדרות הדגל של ה-iPhone, לצד צמיחה מסיבית בסעיף השירותים הדיגיטליים המניב שולי רווח גולמי גבוהים במיוחד."
+                    elif any(word in q_lower for word in ["מחזור", "ווליום", "volume"]):
+                        st.session_state.ai_answer = "<b>הסבר על נפח מסחר (Volume):</b> נפח המסחר מציין את כמות המניות שהחליפו ידיים במהלך יום המסחר. מחזור גבוה מעיד על כניסת כסף מוסדי ומאשרר תנועות במחיר (כמו פריצה או שבירה), בעוד מחזור נמוך מצביע על חוסר עניין ועלול להעיד על פריצת שווא."
+                    elif any(word in q_lower for word in ["נר", "נרות", "יפני"]):
+                        st.session_state.ai_answer = "<b>הסבר על נרות יפניים:</b> שיטת תצוגה המציגה את התנהגות המחיר (פתיחה, סגירה, גבוה, נמוך) בפרק זמן מסוים. צורת הנר מרמזת על מאבק הכוחות בין הקונים למוכרים ויכולה לאותת על היפוך מגמה או המשכיות."
+                    elif any(word in q_lower for word in ["ממוצע", "ma9", "ma100", "ma200", "נע", "ממוצעים"]):
+                        st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת. ממוצעים קצרים מגיבים מהר (זיהוי מומנטום), וממוצעים ארוכים מייצגים מגמות מאקרו."
+                    elif any(word in q_lower for word in ["rsi", "מתנד", "עוצמה"]):
+                        st.session_state.ai_answer = "<b>הסבר על מדד ה-RSI:</b> מתנד טכני המודד את עוצמת שינויי המחירים בסולם של 0 עד 100. מעל 70 הנכס ב'קניית יתר' (Overbought), ומתחת ל-30 הנכס ב'מכירת יתר' (Oversold)."
+                    elif any(word in q_lower for word in ["שורט", "חסר"]):
+                        st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה, ושואף לקנות אותן בחזרה במחיר נמוך יותר."
+                    else:
+                        st.session_state.ai_answer = (
+                            f"<b>שים לב: כדי שהמערכת תענה בחופשיות על שאלות מורכבות כמו '{q}' בזמן אמת, יש להזין מפתח GEMINI_API_KEY בקוד של האפליקציה (שורה 12).</b><br/><br/>"
+                            "עד שיוזן מפתח API, המערכת מספקת תשובות בסיסיות מוגדרות מראש. נסה לשאול על: RSI, ממוצעים נעים, נרות יפניים, מחזור, או שורט."
+                        )
                     
         st.markdown('</div>', unsafe_allow_html=True)
         
