@@ -7,8 +7,8 @@ import requests
 import os
 import contextlib
 
-# הוספת תמיכה ב-Gemini API לשאלות חופשיות - המפתח שלך הוזן כאן
-GEMINI_API_KEY = "AQ.Ab8RN6IXPR-4I1jtU1h79sHrYDu9WAk9qIbsuuhtQNSlkA74WA" 
+# >>> הזרק כאן את מפתח ה-API החדש שלך (חייב להתחיל ב-AIzaSy) <<<
+GEMINI_API_KEY = "הכנס_את_המפתח_כאן" 
 
 try:
     import google.generativeai as genai
@@ -241,6 +241,8 @@ def do_scan(mode):
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+            
+            # הורדנו את מגבלת ה-200 ימים הבעייתית של יאהו פיננס
             if df.empty or len(df) < 50:
                 continue
             
@@ -254,25 +256,25 @@ def do_scan(mode):
             ma9   = float(ma9_series.iloc[-1])
             ma9_prev = float(ma9_series.iloc[-2])
             
-            ma100 = float(close.rolling(100).mean().iloc[-1]) if len(close) >= 100 else last
-            ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else last
-            
+            ma100 = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
+            ma200 = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
             if mode == "long":
+                # נפסל אם המניה נסחרת בו זמנית מעל ממוצעים 9, 100 ו-200 (למניעת מתיחת יתר)
                 if (last > ma9 and prev > ma9_prev and rsi < 70 and vol > 1_000_000
-                        and not (last > ma9 and last > ma100 and last > ma200)
+                        and not (last > ma100 and last > ma200 and last > ma9)
                         and float(close.iloc[-1]) > float(df["Open"].iloc[-1])
                         and last > prev and chg > 0):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
+                # איתות שורט רק כשה-RSI מעל 30 ויש שני ימי סגירה שליליים ברצף
                 close_1 = float(close.iloc[-1])
                 close_2 = float(close.iloc[-2])
                 close_3 = float(close.iloc[-3])
-                
                 two_consecutive_down = (close_1 < close_2) and (close_2 < close_3)
-                
+
                 if (rsi > 30 and two_consecutive_down and vol > 1_000_000
                         and float(close.iloc[-1]) < float(df["Open"].iloc[-1])):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
@@ -284,18 +286,15 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        # פתרון החסימות: ניסיון ראשון עם Session מותאם כדי לעקוף חסימות שרת
         session = get_session()
         t = yf.Ticker(ticker, session=session)
-        df = t.history(period="1y", interval="1d", auto_adjust=True)
-            
-        # גיבוי: ניסיון שני ללא Session או עם טווח מקסימלי במקרה של חסימה
+        df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+        
+        # הקלה בדרישת כמות הנתונים ההיסטורית כדי למנוע קריסות (הורד מ-200 ל-20)
         if df.empty or len(df) < 20:
-            t_fallback = yf.Ticker(ticker)
-            df = t_fallback.history(period="1y", interval="1d", auto_adjust=True)
-            if df.empty or len(df) < 20:
-                df = t_fallback.history(period="max", interval="1d", auto_adjust=True)
-                
+            t = yf.Ticker(ticker)
+            df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+            
         if df.empty or len(df) < 20:
             return None
             
@@ -313,8 +312,9 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        ma100_series = close.rolling(100).mean().fillna(method='bfill').fillna(last)
-        ma200_series = close.rolling(200).mean().fillna(method='bfill').fillna(last)
+        # מילוי ממוצעים חסרים מתמטית כך שלא יקרוס
+        ma100_series = close.rolling(100).mean().bfill().fillna(last)
+        ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
         above_all = True
         below_all = True
@@ -332,15 +332,11 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # עטיפת משיכת ה-info כדי למנוע קריסה
         info = {}
         try:
             info = t.info if t.info else {}
         except Exception:
-            try:
-                info = t_fallback.info if t_fallback.info else {}
-            except Exception:
-                pass
+            pass
         
         calls_ratio = round(50 + (rsi - 50) * 0.5 + random.uniform(-2, 2), 1)
         calls_ratio = max(10.0, min(95.0, calls_ratio))
@@ -561,6 +557,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .mrow-dn{{font-size:0.72rem;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.1);padding:2px 7px;border-radius:2px}}
 .quote-strip{{background:#c9a84c;padding:22px 40px;text-align:center}}
 .quote-text{{font-family:'Playfair Display',serif;font-size:1.1rem;font-style:italic;font-weight:700;color:#0a0a08}}
+.quote-src{{font-size:0.7rem;font-weight:600;letter-spacing:0.1em;color:rgba(10,10,8,0.5);margin-top:6px;text-transform:uppercase}}
 .modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(12px)}}
 .modal-overlay.open{{display:flex}}
 .modal{{background:#141410;border:1px solid rgba(201,168,76,0.12);border-radius:4px;padding:40px;max-width:440px;width:90%;text-align:center}}
@@ -609,7 +606,8 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   </div>
 </section>
 <div class="quote-strip">
-  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות" &nbsp; — וורן באפט</div>
+  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות"</div>
+  <div class="quote-src">— Warren Buffett</div>
 </div>
 <script>
 const QUOTES  = {quotes_json};
@@ -652,7 +650,7 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
+tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["📈 רדאר לונג", "📉 רדאר שורט", "🤖 ניתוח AI", "📊 מדד הפחד והגרידיות"])
 
 # ── טאב לונג ──
 with tab_long:
@@ -722,7 +720,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת (יומיים ברצף)</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
@@ -801,15 +799,15 @@ with tab_ai:
   <div class="panel-title">שאלות כלליות</div>
   <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
 </div>""", unsafe_allow_html=True)
-        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה מחזור? איך לזהות תמיכה?", label_visibility="collapsed")
+        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה RSI? איך לזהות פריצה?", label_visibility="collapsed")
         st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
         if st.button("שאל", key="qa_trigger"):
             if qa_val:
                 q = qa_val.strip()
                 
-                # בדיקה האם הוכנס מפתח API של Gemini
-                if GEMINI_API_KEY and GENAI_AVAILABLE:
+                # בדיקה האם הוכנס מפתח API של Gemini והספרייה מותקנת
+                if GEMINI_API_KEY != "הכנס_את_המפתח_כאן" and GENAI_AVAILABLE:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
@@ -821,7 +819,7 @@ with tab_ai:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם Gemini:</b> {str(e)}<br/>אנא ודא שמפתח ה-API שלך תקין ומוגדר נכון."
                 
                 else:
-                    # גיבוי (Fallback) למקרה שאין מפתח API מוזן במערכת
+                    # גיבוי (Fallback) למקרה שאין מפתח API או שהספרייה לא מותקנת
                     q_lower = q.lower()
                     if "טסלה" in q_lower or "tsla" in q_lower:
                         st.session_state.ai_answer = "<b>חברת טסלה (TSLA):</b> חלוצת הרכבים החשמליים העולמית. ליבת רווחיה מגיעה ישירות ממכירת רכבים פרטיים ומסחריים, לצד הכנסות משלימות ממכירת קרדיטים סביבתיים (Regulatory Credits)."
@@ -839,8 +837,8 @@ with tab_ai:
                         st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה, ושואף לקנות אותן בחזרה במחיר נמוך יותר."
                     else:
                         st.session_state.ai_answer = (
-                            f"<b>שים לב: כדי שהמערכת תענה בחופשיות על שאלות מורכבות כמו '{q}' בזמן אמת, יש להזין מפתח GEMINI_API_KEY בקוד של האפליקציה (שורה 12).</b><br/><br/>"
-                            "עד שיוזן מפתח API תקין, המערכת מספקת תשובות בסיסיות מוגדרות מראש. נסה לשאול על: RSI, ממוצעים נעים, נרות יפניים, מחזור, או שורט."
+                            f"<b>שים לב: כדי שהמערכת תענה בחופשיות על שאלות מורכבות כמו '{q}' בזמן אמת, יש להזין מפתח GEMINI_API_KEY תקין ולהתקין את הספרייה.</b><br/><br/>"
+                            "עד אז, המערכת מספקת רק תשובות מוגדרות מראש למונחים כמו: RSI, ממוצעים, נרות, מחזור, או שורט."
                         )
                     
         st.markdown('</div>', unsafe_allow_html=True)
