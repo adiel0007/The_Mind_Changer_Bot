@@ -7,7 +7,7 @@ import requests
 import os
 import contextlib
 
-# משיכת המפתח מתוך הסודות של Streamlit (הגדרת את זה מעולה ב-Settings)
+# משיכת המפתח מתוך הסודות של Streamlit 
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
@@ -311,6 +311,7 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
+        # מילוי ממוצעים חסרים מתמטית ולא אקראית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -330,60 +331,99 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
+        # --- משיכת נתוני דוחות אמיתיים בלבד (הוסר זיוף הנתונים) ---
+        earnings_text = "אין נתונים זמינים"
+        earnings_badge = "לא זמין"
+        earnings_pos = None
+
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                now = pd.Timestamp.utcnow()
+                if ed.index.tz is None:
+                    ed.index = ed.index.tz_localize('UTC')
+                # לוקח עד 4 רבעונים שדווחו בפועל
+                past_ed = ed[ed.index < now].head(4)
+                
+                if not past_ed.empty:
+                    beats = 0
+                    total = len(past_ed)
+                    for idx, row in past_ed.iterrows():
+                        rep = row.get('Reported EPS')
+                        est = row.get('EPS Estimate')
+                        if pd.notna(rep) and pd.notna(est) and rep >= est:
+                            beats += 1
+                    earnings_text = f"עמדה בתחזיות ב-{beats} מתוך {total} רבעונים אחרונים"
+                    earnings_badge = f"{beats}/{total} הצלחה"
+                    earnings_pos = beats > (total / 2)
+                else:
+                    raise ValueError("No past earnings data")
+            else:
+                raise ValueError("No earnings dates")
+        except Exception:
+            pass # נשאר 'אין נתונים זמינים'
+
         info = {}
         try:
-            info = t.info if t.info else {}
+            info = t.info if hasattr(t, 'info') and t.info else {}
         except Exception:
             pass
         
-        calls_ratio = round(50 + (rsi - 50) * 0.5 + random.uniform(-2, 2), 1)
-        calls_ratio = max(10.0, min(95.0, calls_ratio))
-        options_text = f"רוב אופציות קול ({calls_ratio}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100-calls_ratio:.1f}%)"
-
+        # --- חישוב יחס אופציות אמיתי מהבורסה ---
+        options_text = "אין נתוני אופציות"
         try:
-            revenue_growth = info.get("revenueGrowth", 0.05)
-            if revenue_growth > 0:
-                earnings_text = "עמדה בכל התחזיות בשנה האחרונה 4/4"
-                earnings_badge = "4/4 הצלחה"
-                earnings_pos = True
+            opts = t.options
+            if opt_dates := list(opts):
+                nearest = opt_dates[0]
+                chain = t.option_chain(nearest)
+                calls_oi = chain.calls['openInterest'].sum()
+                puts_oi = chain.puts['openInterest'].sum()
+                total_oi = calls_oi + puts_oi
+                if total_oi > 0:
+                    calls_ratio = (calls_oi / total_oi) * 100
+                    if calls_ratio >= 50:
+                        options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
+                    else:
+                        options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
+        except Exception:
+            pass
+
+        # --- צמיחה אמיתית בלבד ---
+        rev_growth = info.get("revenueGrowth")
+        if rev_growth is not None:
+            rev_growth_pct = round(rev_growth * 100, 1)
+            if rev_growth_pct >= 0:
+                forecast_text = f"צפי לגדילה בהכנסות ב-{rev_growth_pct}%"
+                forecast_pos = True
             else:
-                earnings_text = "לא עמדה ב-1/4 רבעונים השנה"
-                earnings_badge = "פספוס 1/4"
-                earnings_pos = False
-        except:
-            earnings_text = "עמדה בכל התחזיות בשנה האחרונה 4/4"
-            earnings_badge = "4/4 הצלחה"
-            earnings_pos = True
-
-        rev_growth_pct = round(info.get("revenueGrowth", 0.05) * 100, 1)
-        if rev_growth_pct == 0:
-            rev_growth_pct = round(random.uniform(4.5, 12.8), 1)
-            
-        if rev_growth_pct >= 0:
-            forecast_text = f"צפי לגדילה בהכנסות ב-{rev_growth_pct}%"
-            forecast_pos = True
+                forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
+                forecast_pos = False
         else:
-            forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
-            forecast_pos = False
+            forecast_text = "אין תחזית צמיחה זמינה"
+            forecast_pos = None
 
-        recommendation = info.get("recommendationKey", "buy")
-        target_mean = info.get("targetMeanPrice", last)
+        # --- המלצות אנליסטים אמיתיות בלבד ---
+        rec_key = info.get("recommendationKey")
+        num_analysts = info.get("numberOfAnalystOpinions")
         
-        if recommendation in ["buy", "strong_buy"]:
-            rec_pct = round(72.0 + (last/target_mean if target_mean else 1)*10 + random.uniform(-2,2), 1)
-            rec_pct = max(55.0, min(98.0, rec_pct))
-            rec_text = f"רוב של {rec_pct}% ממליצים לקנות"
-            rec_badge = "קנייה חזקה"
-            rec_pos = True
-        elif recommendation in ["sell", "strong_sell"]:
-            rec_pct = round(65.0 + random.uniform(-5,5), 1)
-            rec_text = f"רוב של {rec_pct}% ממליצים למכור"
-            rec_badge = "שורט/מכירה"
-            rec_pos = False
+        if rec_key and rec_key != "none":
+            hebrew_rec = {
+                "strong_buy": "קנייה חזקה",
+                "buy": "קנייה",
+                "hold": "אחזקה",
+                "sell": "מכירה",
+                "strong_sell": "מכירה חזקה",
+                "underperform": "תשואת חסר",
+                "outperform": "תשואת יתר"
+            }
+            translated_rec = hebrew_rec.get(rec_key, rec_key.replace('_', ' ').title())
+            analyst_text = f"מבוסס על {num_analysts} אנליסטים" if num_analysts else "קונצנזוס"
+            rec_text = f"המלצה: {translated_rec} ({analyst_text})"
+            rec_badge = translated_rec
+            rec_pos = rec_key in ["buy", "strong_buy", "outperform"]
         else:
-            rec_pct = round(58.0 + random.uniform(-4,4), 1)
-            rec_text = f"רוב של {rec_pct}% באחזקה"
-            rec_badge = "אחזקה"
+            rec_text = "אין המלצות אנליסטים"
+            rec_badge = "לא זמין"
             rec_pos = None
 
         ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
@@ -474,9 +514,9 @@ def render_analysis(d):
         make_row("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), rsi_pos) +
         make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", ma_pos) +
         make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) +
-        make_row("דוחות כספיים בשנה האחרונה", d.get("earnings", ""), d.get("earnings_badge", ""), earnings_pos) +
-        make_row("צפי לרבעון הבא", d.get("forecast_text", ""), "תחזית", forecast_pos) +
-        make_row("המלצת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), rec_pos)
+        make_row("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), earnings_pos) +
+        make_row("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", forecast_pos) +
+        make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), rec_pos)
     )
 
     html = (
@@ -815,17 +855,18 @@ with tab_ai:
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
                             
-                            # כאן התיקון! הסרתי את המילה prompt= שהקריסה את המערכת.
+                            # תוקנה שגיאת ה-API, עכשיו עובד מול המודל המעודכן!
                             try:
-                                model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                                model = genai.GenerativeModel('gemini-1.5-flash')
                                 response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
+                                st.session_state.ai_answer = response.text
                             except Exception as e:
                                 if "404" in str(e) or "not found" in str(e).lower():
                                     model = genai.GenerativeModel('gemini-pro')
                                     response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
+                                    st.session_state.ai_answer = response.text
                                 else:
-                                    raise e
-                            st.session_state.ai_answer = response.text
+                                    st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
                         except Exception as e:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
                     
