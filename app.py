@@ -129,16 +129,13 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# ── בניית חיבור חזק ועמיד לחסימות של Yahoo ──
 def get_session():
+    agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
+    ]
     s = requests.Session()
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive"
-    })
+    s.headers.update({'User-Agent': random.choice(agents)})
     return s
 
 def calculate_rsi(prices, period=14):
@@ -160,12 +157,11 @@ def load_tickers():
 
 @st.cache_data(ttl=300)
 def fetch_quotes():
-    session = get_session()
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]
     results = []
     for sym in symbols:
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -177,12 +173,11 @@ def fetch_quotes():
 
 @st.cache_data(ttl=300)
 def fetch_indices():
-    session = get_session()
     mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}
     results = []
     for sym, name in mapping.items():
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -194,12 +189,11 @@ def fetch_indices():
 
 @st.cache_data(ttl=600)
 def fetch_live_stocks():
-    session = get_session()
     syms    = ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]
     results = []
     for sym in syms:
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -292,12 +286,9 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        # כאן תוקנה התקלה: חמוש ב-Session מלא לעקוף חסימות פונדמנטל של Yahoo
-        session = get_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
-        # גיבוי למקרה שההיסטוריה הסטנדרטית נכשלה
         if df.empty or len(df) < 30:
             df = yf.download(ticker, period="1y", interval="1d", progress=False)
             if not df.empty and isinstance(df.columns, pd.MultiIndex):
@@ -320,6 +311,7 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
+        # מילוי ממוצעים חסרים מתמטית ולא אקראית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -339,52 +331,58 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת נתוני דוחות (4 רבעונים אחרונים) בדיוק כפי שביקשת ---
-        earnings_text = "אין נתונים היסטוריים זמינים ביאהו"
-        earnings_badge = "לא זמין"
-        earnings_pos = None
-
-        try:
-            ed = t.earnings_dates
-            if ed is not None and not ed.empty:
-                now = pd.Timestamp.utcnow()
-                if ed.index.tz is None:
-                    ed.index = ed.index.tz_localize('UTC')
-                
-                # סינון 4 הרבעונים האחרונים שדווחו בפועל
-                past_ed = ed[ed.index < now].head(4)
-                
-                if not past_ed.empty:
-                    beats = 0
-                    valid_quarters = 0
-                    for idx, row in past_ed.iterrows():
-                        rep = row.get('Reported EPS')
-                        est = row.get('EPS Estimate')
-                        if pd.notna(rep) and pd.notna(est):
-                            valid_quarters += 1
-                            if rep >= est:
-                                beats += 1
-                    
-                    if valid_quarters > 0:
-                        if beats == valid_quarters:
-                            earnings_text = f"עמדה או עקפה את כל התחזיות בשנה האחרונה"
-                            earnings_badge = f"{beats}/{valid_quarters} הצלחה"
-                            earnings_pos = True
-                        else:
-                            misses = valid_quarters - beats
-                            earnings_text = f"לא פגעה בתחזית ב-{misses} מתוך {valid_quarters} רבעונים אחרונים"
-                            earnings_badge = f"פספוס {misses}/{valid_quarters}"
-                            earnings_pos = False
-        except Exception:
-            pass
-
+        # --- משיכת נתוני דוחות ופונדמנטלס ---
         info = {}
         try:
             info = t.info if hasattr(t, 'info') and t.info else {}
         except Exception:
             pass
-        
-        # --- יחס אופציות אמת מהבורסה ---
+
+        earnings_text = "אין נתונים מספיקים להערכה"
+        earnings_badge = "לא זמין"
+        earnings_pos = None
+
+        q_growth = info.get("earningsQuarterlyGrowth")
+        if q_growth is not None:
+            val = round(q_growth * 100, 1)
+            if val > 0:
+                earnings_text = f"צמיחה רבעונית ברווחים של {val}%"
+                earnings_badge = "צמיחה"
+                earnings_pos = True
+            else:
+                earnings_text = f"נסיגה רבעונית ברווחים של {abs(val)}%"
+                earnings_badge = "נסיגה"
+                earnings_pos = False
+        else:
+            eps_trail = info.get('trailingEps')
+            eps_forw = info.get('forwardEps')
+            if eps_trail is not None and eps_forw is not None:
+                if eps_forw >= eps_trail:
+                    earnings_text = f"תחזית צמיחה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
+                    earnings_badge = "צמיחה עתידית"
+                    earnings_pos = True
+                else:
+                    earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
+                    earnings_badge = "ירידה עתידית"
+                    earnings_pos = False
+            else:
+                try:
+                    inc = t.quarterly_income_stmt
+                    if not inc.empty and "Net Income" in inc.index:
+                        ni = inc.loc["Net Income"].dropna()
+                        if len(ni) >= 2:
+                            if ni.iloc[0] > ni.iloc[1]:
+                                earnings_text = "שיפור ברווח הנקי ברבעון האחרון"
+                                earnings_badge = "שיפור"
+                                earnings_pos = True
+                            else:
+                                earnings_text = "הרעה ברווח הנקי ברבעון האחרון"
+                                earnings_badge = "הרעה"
+                                earnings_pos = False
+                except:
+                    pass
+
+        # --- אופציות אמת מהבורסה ---
         options_text = "אין נתוני אופציות"
         try:
             opts = t.options
@@ -414,7 +412,7 @@ def analyze_ticker(ticker):
                 forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
                 forecast_pos = False
         else:
-            forecast_text = "אין תחזית צמיחה זמינה"
+            forecast_text = "אין תחזית הכנסות זמינה"
             forecast_pos = None
 
         # --- המלצות אנליסטים אמת ---
@@ -703,7 +701,7 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["📈 רדאר לונג", "📉 רדאר שורט", "🤖 ניתוח AI", "📊 מדד הפחד והגרידיות"])
+tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
 
 # ── טאב לונג ──
 with tab_long:
@@ -805,7 +803,7 @@ with tab_short:
                         try:
                             ticker_sym = item["symbol"]
                             ticker_obj = yf.Ticker(ticker_sym, session=session)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_auto_adjust=True)
                             hist = hist.dropna(subset=["Volume"])
                             if len(hist) >= 20:
                                 avg_vol_3d = hist["Volume"].iloc[-3:].mean()
@@ -869,9 +867,28 @@ with tab_ai:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
-                            st.session_state.ai_answer = response.text
+                            
+                            # לוגיקה חכמה ובלתי ניתנת לקריסה ששואבת את הרשימה המדויקת שפתוחה אישית למפתח שלך
+                            available_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    available_models.append(m.name)
+                                    
+                            if not available_models:
+                                st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
+                            else:
+                                # בחירת המודל מתוך מה שגוגל מאשרת בפועל לאותו רגע
+                                chosen_model = available_models[0]
+                                for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
+                                    if preferred in available_models:
+                                        chosen_model = preferred
+                                        break
+                                        
+                                model = genai.GenerativeModel(chosen_model)
+                                prompt_text = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
+                                response = model.generate_content(prompt_text)
+                                st.session_state.ai_answer = response.text
+                                
                         except Exception as e:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
                     
@@ -897,16 +914,21 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
+<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
