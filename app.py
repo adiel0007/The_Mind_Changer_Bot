@@ -699,7 +699,7 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
+tab_long, tab_short, tab_ai, tab_fear_greed, tab_market_dir = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊", "לאן השוק הולך 🧭"])
 
 # ── טאב לונג ──
 with tab_long:
@@ -922,7 +922,7 @@ with tab_fear_greed:
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
-<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
+<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
 </div>
@@ -946,6 +946,127 @@ with tab_fear_greed:
 </ul>
 </div>"""
         st.markdown(html_text, unsafe_allow_html=True)
+
+# ── כרטיסייה חדשה: לאן השוק הולך ──
+with tab_market_dir:
+    st.markdown("""
+<div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
+  <div class="panel-title">התמונה הגדולה: מדד ה-QQQ</div>
+  <div class="panel-sub">סריקה וניתוח משולב של מדד הנאסד"ק לאיתור מגמת השוק וסינון עסקאות</div>
+</div>""", unsafe_allow_html=True)
+    
+    st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+    if st.button("התחל ניתוח נאסד\"ק 🚀", key="analyze_qqq_btn"):
+        with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
+            try:
+                qqq = yf.Ticker("QQQ")
+                df = qqq.history(period="1mo", interval="1d")
+                opts = qqq.options
+                
+                # 1. בדיקת סנטימנט אופציות
+                calls_oi, puts_oi = 0, 0
+                if opts:
+                    # בדיקת 3 תאריכי הפקיעה הקרובים ביותר לאמינות מקסימלית
+                    for date in opts[:3]:
+                        chain = qqq.option_chain(date)
+                        calls_oi += chain.calls['openInterest'].sum()
+                        puts_oi += chain.puts['openInterest'].sum()
+                
+                total_oi = calls_oi + puts_oi
+                call_pct = (calls_oi / total_oi * 100) if total_oi > 0 else 50
+                put_pct = (puts_oi / total_oi * 100) if total_oi > 0 else 50
+                
+                opt_status = "קולים" if call_pct > put_pct else "פוטים"
+                
+                # 2. חישוב מתנד RSI
+                rsi_val = calculate_rsi(df['Close'])
+                if rsi_val > 70:
+                    rsi_status = "קניית יתר"
+                elif rsi_val < 30:
+                    rsi_status = "מכירת יתר"
+                else:
+                    rsi_status = "ניטרלי"
+                    
+                # 3. ניתוח פעולת מחיר (נרות דיילי)
+                if len(df) >= 3:
+                    c1, c2, c3 = df['Close'].iloc[-1], df['Close'].iloc[-2], df['Close'].iloc[-3]
+                    o1, o2, o3 = df['Open'].iloc[-1], df['Open'].iloc[-2], df['Open'].iloc[-3]
+                    
+                    g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
+                    r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
+                    
+                    # 3 נרות ירוקים רצופים או 2 נרות ירוקים שהאחרון גבוה מקודמו
+                    is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2)
+                    # 3 נרות אדומים רצופים או 2 נרות אדומים שהאחרון נמוך מקודמו
+                    is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2)
+                    
+                    if is_long:
+                        pa_status = "לונג"
+                    elif is_short:
+                        pa_status = "שורט"
+                    else:
+                        pa_status = "מעורב"
+                else:
+                    pa_status = "חסר נתונים"
+                    
+                # שיקלול ותוצאה סופית
+                if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג":
+                    verdict = "לונג"
+                elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט":
+                    verdict = "שורט"
+                else:
+                    verdict = "מעורב"
+                    
+                # הצגת המדדים על המסך
+                st.markdown(f"""
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; direction: rtl;">
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">1. סנטימנט אופציות</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">רוב {opt_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">קולים: {call_pct:.1f}% | פוטים: {put_pct:.1f}%</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">2. מומנטום (RSI)</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{rsi_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">ערך נוכחי: {rsi_val:.1f}</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 ימי המסחר האחרונים</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # הצגת הבאנר הגרפי בהתאם לתוצאה
+                if verdict == "לונג":
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);">
+                        <div style="font-size: 4rem; margin-bottom: 10px;">🚀 🟢</div>
+                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 20px rgba(22,163,74,0.4); letter-spacing: 0.05em;">השוק לונג</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על מומנטום חיובי ושליטת קונים בנאסד"ק. חפש הזדמנויות לונג.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif verdict == "שורט":
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(220,38,38,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #dc2626; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(220,38,38,0.15);">
+                        <div style="font-size: 4rem; margin-bottom: 10px;">🩸 🔴</div>
+                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 20px rgba(220,38,38,0.4); letter-spacing: 0.05em;">השוק בשורט</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על חולשה מהותית ושליטת מוכרים בנאסד"ק. חפש הזדמנויות שורט.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(201,168,76,0.05) 0%, rgba(10,10,8,1) 100%); border: 1px solid rgba(201,168,76,0.3); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px;">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">⚖️</div>
+                        <div style="font-size: 2.2rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #c9a84c; letter-spacing: 0.05em;">מגמה מעורבת</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">אין כרגע איתות מובהק וחד משמעי לכיוון השוק. מומלץ להמתין למבנה ברור יותר.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            except Exception as e:
+                st.error("אירעה שגיאה בניתוח המדד. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
