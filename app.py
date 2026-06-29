@@ -7,8 +7,8 @@ import requests
 import os
 import contextlib
 
-# >>> הזרק כאן את מפתח ה-API החדש שלך (חייב להתחיל ב-AIzaSy) <<<
-GEMINI_API_KEY = "הכנס_את_המפתח_כאן" 
+# המפתח שלך מוזן כאן בפנים
+GEMINI_API_KEY = "AQ.Ab8RN6IXPR-4I1jtU1h79sHrYDu9WAk9qIbsuuhtQNSlkA74WA" 
 
 try:
     import google.generativeai as genai
@@ -240,9 +240,7 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
-            
-            # הורדנו את מגבלת ה-200 ימים הבעייתית של יאהו פיננס
+                df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
             if df.empty or len(df) < 50:
                 continue
             
@@ -262,7 +260,7 @@ def do_scan(mode):
             chg   = round(((last - prev) / prev) * 100, 2)
             
             if mode == "long":
-                # נפסל אם המניה נסחרת בו זמנית מעל ממוצעים 9, 100 ו-200 (למניעת מתיחת יתר)
+                # נפסל אם המניה נסחרת בו זמנית מעל ממוצעים 9, 100 ו-200 למניעת מתיחת יתר
                 if (last > ma9 and prev > ma9_prev and rsi < 70 and vol > 1_000_000
                         and not (last > ma100 and last > ma200 and last > ma9)
                         and float(close.iloc[-1]) > float(df["Open"].iloc[-1])
@@ -290,7 +288,6 @@ def analyze_ticker(ticker):
         t = yf.Ticker(ticker, session=session)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
-        # הקלה בדרישת כמות הנתונים ההיסטורית כדי למנוע קריסות (הורד מ-200 ל-20)
         if df.empty or len(df) < 20:
             t = yf.Ticker(ticker)
             df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
@@ -312,7 +309,7 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        # מילוי ממוצעים חסרים מתמטית כך שלא יקרוס
+        # מילוי ממוצעים חסרים מתמטית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -650,7 +647,7 @@ st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
 st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; direction:rtl; text-align:right;">בחר מצב סריקה וגלה הזדמנויות מסחר בזמן אמת</p>', unsafe_allow_html=True)
 
-tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["📈 רדאר לונג", "📉 רדאר שורט", "🤖 ניתוח AI", "📊 מדד הפחד והגרידיות"])
+tab_long, tab_short, tab_ai, tab_fear_greed = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח AI 🤖", "מדד הפחד והגרידיות 📊"])
 
 # ── טאב לונג ──
 with tab_long:
@@ -799,15 +796,25 @@ with tab_ai:
   <div class="panel-title">שאלות כלליות</div>
   <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
 </div>""", unsafe_allow_html=True)
-        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="מה זה RSI? איך לזהות פריצה?", label_visibility="collapsed")
+        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="כמה כסף זה ב-3 שנים אם אני משקיע...", label_visibility="collapsed")
         st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
         
         if st.button("שאל", key="qa_trigger"):
             if qa_val:
                 q = qa_val.strip()
                 
-                # בדיקה האם הוכנס מפתח API של Gemini והספרייה מותקנת
-                if GEMINI_API_KEY != "הכנס_את_המפתח_כאן" and GENAI_AVAILABLE:
+                # בדיקה האם הספרייה מותקנת פיזית במחשב שלך
+                if not GENAI_AVAILABLE:
+                    st.session_state.ai_answer = (
+                        "<b>⚠️ חסרה ספרייה בסביבת הפיתוח שלך!</b><br/><br/>"
+                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל, עליך להתקין את החבילה הרשמית. "
+                        "אנא פתח את חלון הפקודות (Terminal) והרץ את הפקודה הבאה:<br/><br/>"
+                        "<code style='direction:ltr; display:block; background:rgba(220,38,38,0.1); color:#dc2626; padding:10px; border-radius:4px; text-align:left; font-size:1rem; border:1px solid rgba(220,38,38,0.3);'>"
+                        "pip install google-generativeai"
+                        "</code><br/>"
+                        "לאחר שההתקנה תסתיים, כבה את האפליקציה והפעל אותה מחדש (<code>streamlit run app.py</code>)."
+                    )
+                else:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
@@ -816,30 +823,7 @@ with tab_ai:
                             response = model.generate_content(prompt)
                             st.session_state.ai_answer = response.text
                         except Exception as e:
-                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם Gemini:</b> {str(e)}<br/>אנא ודא שמפתח ה-API שלך תקין ומוגדר נכון."
-                
-                else:
-                    # גיבוי (Fallback) למקרה שאין מפתח API או שהספרייה לא מותקנת
-                    q_lower = q.lower()
-                    if "טסלה" in q_lower or "tsla" in q_lower:
-                        st.session_state.ai_answer = "<b>חברת טסלה (TSLA):</b> חלוצת הרכבים החשמליים העולמית. ליבת רווחיה מגיעה ישירות ממכירת רכבים פרטיים ומסחריים, לצד הכנסות משלימות ממכירת קרדיטים סביבתיים (Regulatory Credits)."
-                    elif "אפל" in q_lower or "aapl" in q_lower:
-                        st.session_state.ai_answer = "<b>חברת אפל (AAPL):</b> ענקית החומרה והתוכנה הגלובלית. רוב רווחיה של החברה מגיעים ישירות ממכירות סדרות הדגל של ה-iPhone, לצד צמיחה מסיבית בסעיף השירותים הדיגיטליים המניב שולי רווח גולמי גבוהים במיוחד."
-                    elif any(word in q_lower for word in ["מחזור", "ווליום", "volume"]):
-                        st.session_state.ai_answer = "<b>הסבר על נפח מסחר (Volume):</b> נפח המסחר מציין את כמות המניות שהחליפו ידיים במהלך יום המסחר. מחזור גבוה מעיד על כניסת כסף מוסדי ומאשרר תנועות במחיר (כמו פריצה או שבירה), בעוד מחזור נמוך מצביע על חוסר עניין ועלול להעיד על פריצת שווא."
-                    elif any(word in q_lower for word in ["נר", "נרות", "יפני"]):
-                        st.session_state.ai_answer = "<b>הסבר על נרות יפניים:</b> שיטת תצוגה המציגה את התנהגות המחיר (פתיחה, סגירה, גבוה, נמוך) בפרק זמן מסוים. צורת הנר מרמזת על מאבק הכוחות בין הקונים למוכרים ויכולה לאותת על היפוך מגמה או המשכיות."
-                    elif any(word in q_lower for word in ["ממוצע", "ma9", "ma100", "ma200", "נע", "ממוצעים"]):
-                        st.session_state.ai_answer = "<b>הסבר על ממוצעים נעים:</b> ממוצע נע הוא כלי מתמטי המחשב את ממוצע מחירי הסגירה של נכס לאורך תקופה מוגדרת. ממוצעים קצרים מגיבים מהר (זיהוי מומנטום), וממוצעים ארוכים מייצגים מגמות מאקרו."
-                    elif any(word in q_lower for word in ["rsi", "מתנד", "עוצמה"]):
-                        st.session_state.ai_answer = "<b>הסבר על מדד ה-RSI:</b> מתנד טכני המודד את עוצמת שינויי המחירים בסולם של 0 עד 100. מעל 70 הנכס ב'קניית יתר' (Overbought), ומתחת ל-30 הנכס ב'מכירת יתר' (Oversold)."
-                    elif any(word in q_lower for word in ["שורט", "חסר"]):
-                        st.session_state.ai_answer = "<b>הסבר על עסקת שורט (Short Selling):</b> אסטרטגיה המאפשרת להרוויח מירידת ערך של מניות. הסוחר שואל מניות מהברוקר, מוכר אותן מיידית במחיר הגבוה, ושואף לקנות אותן בחזרה במחיר נמוך יותר."
-                    else:
-                        st.session_state.ai_answer = (
-                            f"<b>שים לב: כדי שהמערכת תענה בחופשיות על שאלות מורכבות כמו '{q}' בזמן אמת, יש להזין מפתח GEMINI_API_KEY תקין ולהתקין את הספרייה.</b><br/><br/>"
-                            "עד אז, המערכת מספקת רק תשובות מוגדרות מראש למונחים כמו: RSI, ממוצעים, נרות, מחזור, או שורט."
-                        )
+                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}<br/>ייתכן שיש חסימת רשת או שמפתח ה-API הוגבל."
                     
         st.markdown('</div>', unsafe_allow_html=True)
         
