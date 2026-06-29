@@ -13,12 +13,6 @@ try:
 except:
     GEMINI_API_KEY = "הכנס_כאן_את_המפתח_החדש"
 
-try:
-    import google.generativeai as genai
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
-
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
 # ── ה-CSS המקורי של הפאנלים והעיצוב הכללי ──
@@ -337,7 +331,7 @@ def analyze_ticker(ticker):
         except Exception:
             pass
 
-        # --- משיכת נתוני דוחות ופונדמנטלס (הפתעות רווח EPS - Hit/Miss Ratio 4/4) ---
+        # --- משיכת נתוני דוחות ופונדמנטלס (תיקון מתקדם - Fallback לדוח רווח והפסד) ---
         earnings_text = "אין נתונים מספיקים להערכה"
         earnings_badge = "לא זמין"
         earnings_pos = None
@@ -367,6 +361,23 @@ def analyze_ticker(ticker):
                     earnings_text = f"עקפה תחזיות רווח ב-{beats} מתוך {total_q} הרבעונים האחרונים"
                     earnings_badge = f"{beats}/{total_q}"
                     earnings_pos = (beats >= total_q / 2)
+            
+            # אם אין נתוני EPS (המקרה של חברות כמו F או CRCL), נבדוק צמיחה ברווח הנקי
+            if earnings_badge == "לא זמין":
+                inc = t.quarterly_income_stmt
+                if inc is not None and not inc.empty and "Net Income" in inc.index:
+                    ni = inc.loc["Net Income"].dropna()
+                    if len(ni) >= 2:
+                        current_q = ni.iloc[0]
+                        prev_q = ni.iloc[1]
+                        if current_q > prev_q:
+                            earnings_text = "צמיחה ברווח הנקי ביחס לרבעון הקודם"
+                            earnings_badge = "צמיחה"
+                            earnings_pos = True
+                        else:
+                            earnings_text = "ירידה ברווח הנקי ביחס לרבעון הקודם"
+                            earnings_badge = "נסיגה"
+                            earnings_pos = False
         except Exception:
             pass
 
@@ -858,22 +869,29 @@ with tab_ai:
             if qa_val:
                 q = qa_val.strip()
                 
-                if not GENAI_AVAILABLE or GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
+                if GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
                     st.session_state.ai_answer = (
                         "<b>⚠️ חיבור חסר למערכת ה-AI:</b><br/><br/>"
-                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל ולענות על שאלות חופשיות, עליך להדביק את מפתח ה-API החוקי שלך בהגדרות הסודות של השרת.<br/><br/>"
-                        "<i>(עד אז, המערכת תספק תשובות בסיסיות רק למונחים כמו RSI, שורט או ממוצעים).</i>"
+                        "עליך להדביק את מפתח ה-API החוקי שלך בהגדרות הסודות של השרת."
                     )
                 else:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
+                        # מעבר לקריאת REST API ישירה - מונע לחלוטין את שגיאות ה-404 של החבילה הישנה!
+                        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+                        headers = {'Content-Type': 'application/json'}
+                        payload = {
+                            "contents": [{"parts": [{"text": f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"}]}]
+                        }
+                        
                         try:
-                            genai.configure(api_key=GEMINI_API_KEY)
-                            # שימוש בשם המודל העדכני ללא שום קידומת שעושה שגיאות בגרסאות שונות
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
-                            st.session_state.ai_answer = response.text
+                            response = requests.post(api_url, headers=headers, json=payload)
+                            if response.status_code == 200:
+                                data = response.json()
+                                st.session_state.ai_answer = data['candidates'][0]['content']['parts'][0]['text']
+                            else:
+                                st.session_state.ai_answer = f"<b>שגיאת API (קוד {response.status_code}):</b> {response.text}"
                         except Exception as e:
-                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
+                            st.session_state.ai_answer = f"<b>שגיאת תקשורת:</b> {str(e)}"
                     
         st.markdown('</div>', unsafe_allow_html=True)
         
