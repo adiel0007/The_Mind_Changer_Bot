@@ -159,10 +159,9 @@ def load_tickers():
 def fetch_quotes():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]
     results = []
-    session = get_session()
     for sym in symbols:
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -176,10 +175,9 @@ def fetch_quotes():
 def fetch_indices():
     mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}
     results = []
-    session = get_session()
     for sym, name in mapping.items():
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -193,10 +191,9 @@ def fetch_indices():
 def fetch_live_stocks():
     syms    = ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]
     results = []
-    session = get_session()
     for sym in syms:
         try:
-            t     = yf.Ticker(sym, session=session)
+            t     = yf.Ticker(sym)
             fi    = t.fast_info
             price = round(float(fi.last_price), 2)
             prev  = float(fi.previous_close)
@@ -289,8 +286,7 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        session = get_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
         if df.empty or len(df) < 30:
@@ -315,6 +311,7 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
+        # מילוי ממוצעים חסרים מתמטית ולא אקראית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -334,46 +331,58 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת דוחות כספיים באמצעות המאפיין הרשמי והמאובטח של yfinance ---
-        valid_quarters = 0
-        beats = 0
-        try:
-            eh = t.earnings_history
-            if eh is not None and not eh.empty:
-                # לוקחים את 4 הרבעונים האחרונים המדווחים
-                past_ed = eh.head(4)
-                for idx, row in past_ed.iterrows():
-                    rep = row.get('Reported EPS')
-                    est = row.get('EPS Estimate')
-                    if pd.notna(rep) and pd.notna(est):
-                        valid_quarters += 1
-                        if rep >= est:
-                            beats += 1
-        except:
-            pass
-
-        if valid_quarters > 0:
-            if beats == valid_quarters:
-                earnings_text = "עמדה או עקפה את כל התחזיות בשנה האחרונה"
-                earnings_badge = f"{beats}/{valid_quarters} הצלחה"
-                earnings_pos = True
-            else:
-                misses = valid_quarters - beats
-                earnings_text = f"לא פגעה בתחזית ב-{misses} מתוך {valid_quarters} רבעונים אחרונים"
-                earnings_badge = f"פספוס {misses}/{valid_quarters}"
-                earnings_pos = False
-        else:
-            earnings_text = "אין נתונים היסטוריים זמינים ביאהו"
-            earnings_badge = "לא זמין"
-            earnings_pos = None
-
+        # --- משיכת נתוני דוחות ופונדמנטלס ---
         info = {}
         try:
             info = t.info if hasattr(t, 'info') and t.info else {}
         except Exception:
             pass
-        
-        # --- יחס אופציות אמת מהבורסה ---
+
+        earnings_text = "אין נתונים מספיקים להערכה"
+        earnings_badge = "לא זמין"
+        earnings_pos = None
+
+        q_growth = info.get("earningsQuarterlyGrowth")
+        if q_growth is not None:
+            val = round(q_growth * 100, 1)
+            if val > 0:
+                earnings_text = f"צמיחה רבעונית ברווחים של {val}%"
+                earnings_badge = "צמיחה"
+                earnings_pos = True
+            else:
+                earnings_text = f"נסיגה רבעונית ברווחים של {abs(val)}%"
+                earnings_badge = "נסיגה"
+                earnings_pos = False
+        else:
+            eps_trail = info.get('trailingEps')
+            eps_forw = info.get('forwardEps')
+            if eps_trail is not None and eps_forw is not None:
+                if eps_forw >= eps_trail:
+                    earnings_text = f"תחזית צמיחה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
+                    earnings_badge = "צמיחה עתידית"
+                    earnings_pos = True
+                else:
+                    earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
+                    earnings_badge = "ירידה עתידית"
+                    earnings_pos = False
+            else:
+                try:
+                    inc = t.quarterly_income_stmt
+                    if not inc.empty and "Net Income" in inc.index:
+                        ni = inc.loc["Net Income"].dropna()
+                        if len(ni) >= 2:
+                            if ni.iloc[0] > ni.iloc[1]:
+                                earnings_text = "שיפור ברווח הנקי ברבעון האחרון"
+                                earnings_badge = "שיפור"
+                                earnings_pos = True
+                            else:
+                                earnings_text = "הרעה ברווח הנקי ברבעון האחרון"
+                                earnings_badge = "הרעה"
+                                earnings_pos = False
+                except:
+                    pass
+
+        # --- אופציות אמת מהבורסה ---
         options_text = "אין נתוני אופציות"
         try:
             opts = t.options
@@ -403,7 +412,7 @@ def analyze_ticker(ticker):
                 forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
                 forecast_pos = False
         else:
-            forecast_text = "אין תחזית צמיחה זמינה"
+            forecast_text = "אין תחזית הכנסות זמינה"
             forecast_pos = None
 
         # --- המלצות אנליסטים אמת ---
@@ -519,7 +528,7 @@ def render_analysis(d):
         make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", ma_pos) +
         make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) +
         make_row("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), earnings_pos) +
-        make_row("צפי הכנסות", d.get("forecast_text", ""), "תחזית", forecast_pos) +
+        make_row("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", forecast_pos) +
         make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), rec_pos)
     )
 
@@ -794,7 +803,7 @@ with tab_short:
                         try:
                             ticker_sym = item["symbol"]
                             ticker_obj = yf.Ticker(ticker_sym, session=session)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_auto_adjust=True)
                             hist = hist.dropna(subset=["Volume"])
                             if len(hist) >= 20:
                                 avg_vol_3d = hist["Volume"].iloc[-3:].mean()
@@ -859,10 +868,26 @@ with tab_ai:
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
                             
-                            # לוגיקה חלקה ונקייה ללא ניחושים. שימוש במודל הפלאש היציב ביותר.
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
-                            st.session_state.ai_answer = response.text
+                            # לוגיקה חכמה ובלתי ניתנת לקריסה ששואבת את הרשימה המדויקת שפתוחה אישית למפתח שלך
+                            available_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    available_models.append(m.name)
+                                    
+                            if not available_models:
+                                st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
+                            else:
+                                # בחירת המודל מתוך מה שגוגל מאשרת בפועל לאותו רגע
+                                chosen_model = available_models[0]
+                                for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
+                                    if preferred in available_models:
+                                        chosen_model = preferred
+                                        break
+                                        
+                                model = genai.GenerativeModel(chosen_model)
+                                prompt_text = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
+                                response = model.generate_content(prompt_text)
+                                st.session_state.ai_answer = response.text
                                 
                         except Exception as e:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
@@ -922,7 +947,7 @@ with tab_fear_greed:
 </p>
 <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
 <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
-<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד on פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
+<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
 <li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
 <li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
 </ul>
