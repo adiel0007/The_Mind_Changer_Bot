@@ -138,32 +138,6 @@ def get_session():
     s.headers.update({'User-Agent': random.choice(agents)})
     return s
 
-# ── פונקציה מיוחדת וישירה לשליפת דוחות 4 רבעונים (עוקפת את yfinance) ──
-def get_earnings_history_yahoo(ticker):
-    valid = 0
-    beats = 0
-    try:
-        s = requests.Session()
-        s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"})
-        
-        # פנייה ל-API הפנימי של יאהו במקום לספרייה
-        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=earningsHistory"
-        res = s.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            history = data.get("quoteSummary", {}).get("result", [{}])[0].get("earningsHistory", {}).get("history", [])
-            
-            for q in history:
-                actual = q.get("epsActual", {}).get("raw")
-                est = q.get("epsEstimate", {}).get("raw")
-                if actual is not None and est is not None:
-                    valid += 1
-                    if actual >= est:
-                        beats += 1
-    except:
-        pass
-    return valid, beats
-
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -360,27 +334,23 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת דוחות כספיים - שימוש בפונקציה החסינה שכתבנו (מנותק מ-yfinance) ---
-        valid_quarters, beats = get_earnings_history_yahoo(ticker)
-        
-        # גיבוי אחרון דרך yfinance אם הפונקציה הישירה חסומה
-        if valid_quarters == 0:
-            try:
-                ed = t.earnings_dates
-                if ed is not None and not ed.empty:
-                    now = pd.Timestamp.utcnow()
-                    if ed.index.tz is None:
-                        ed.index = ed.index.tz_localize('UTC')
-                    past_ed = ed[ed.index < now].head(4)
-                    for idx, row in past_ed.iterrows():
-                        rep = row.get('Reported EPS')
-                        est = row.get('EPS Estimate')
-                        if pd.notna(rep) and pd.notna(est):
-                            valid_quarters += 1
-                            if rep >= est:
-                                beats += 1
-            except:
-                pass
+        # --- משיכת דוחות כספיים באמצעות המאפיין הרשמי והמאובטח של yfinance ---
+        valid_quarters = 0
+        beats = 0
+        try:
+            eh = t.earnings_history
+            if eh is not None and not eh.empty:
+                # לוקחים את 4 הרבעונים האחרונים המדווחים
+                past_ed = eh.head(4)
+                for idx, row in past_ed.iterrows():
+                    rep = row.get('Reported EPS')
+                    est = row.get('EPS Estimate')
+                    if pd.notna(rep) and pd.notna(est):
+                        valid_quarters += 1
+                        if rep >= est:
+                            beats += 1
+        except:
+            pass
 
         if valid_quarters > 0:
             if beats == valid_quarters:
@@ -403,7 +373,7 @@ def analyze_ticker(ticker):
         except Exception:
             pass
         
-        # --- אופציות אמת מהבורסה ---
+        # --- יחס אופציות אמת מהבורסה ---
         options_text = "אין נתוני אופציות"
         try:
             opts = t.options
@@ -422,7 +392,7 @@ def analyze_ticker(ticker):
         except Exception:
             pass
 
-        # --- צמיחה ---
+        # --- צמיחה בהכנסות ---
         rev_growth = info.get("revenueGrowth")
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
@@ -433,7 +403,7 @@ def analyze_ticker(ticker):
                 forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
                 forecast_pos = False
         else:
-            forecast_text = "אין תחזית הכנסות זמינה"
+            forecast_text = "אין תחזית צמיחה זמינה"
             forecast_pos = None
 
         # --- המלצות אנליסטים אמת ---
@@ -919,16 +889,21 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
+<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
@@ -947,7 +922,7 @@ with tab_fear_greed:
 </p>
 <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
 <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
-<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
+<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד on פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
 <li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
 <li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
 </ul>
