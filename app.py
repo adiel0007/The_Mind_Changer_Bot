@@ -337,7 +337,7 @@ def analyze_ticker(ticker):
         except Exception:
             pass
 
-        # --- משיכת נתוני דוחות ופונדמנטלס (הפתעות רווח EPS - Hit/Miss Ratio) ---
+        # --- משיכת נתוני דוחות ופונדמנטלס (הפתעות רווח EPS - Hit/Miss Ratio 4/4) ---
         earnings_text = "אין נתונים מספיקים להערכה"
         earnings_badge = "לא זמין"
         earnings_pos = None
@@ -403,7 +403,7 @@ def analyze_ticker(ticker):
             forecast_text = "אין תחזית הכנסות זמינה"
             forecast_pos = None
 
-        # --- המלצות אנליסטים אמת (כולל חישוב אחוזים) ---
+        # --- המלצות אנליסטים אמת (חישוב אחוזים מדויק) ---
         rec_key = info.get("recommendationKey", "")
         rec_text = "אין המלצות אנליסטים"
         rec_badge = "לא זמין"
@@ -868,7 +868,7 @@ with tab_ai:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
-                            # פנייה למודל נקי וללא קידומת שעשתה שגיאות
+                            # שימוש בשם המודל העדכני ללא שום קידומת שעושה שגיאות בגרסאות שונות
                             model = genai.GenerativeModel('gemini-1.5-flash')
                             response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
                             st.session_state.ai_answer = response.text
