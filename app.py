@@ -998,7 +998,7 @@ with tab_fear_greed:
         html_text = """<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
 <h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
 <p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
-מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי במניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
 </p>
 <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
 <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
@@ -1034,7 +1034,9 @@ with tab_market_dir:
         with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
             try:
                 qqq = yf.Ticker("QQQ")
-                df = qqq.history(period="1mo", interval="1d")
+                # שינינו ל-2y כדי שיהיה מספיק מידע לממוצע נע 200
+                df = qqq.history(period="2y", interval="1d")
+                df = df.dropna(subset=['Close', 'Open'])
                 opts = qqq.options
                 
                 # 1. בדיקת סנטימנט אופציות
@@ -1061,8 +1063,8 @@ with tab_market_dir:
                 else:
                     rsi_status = "ניטרלי"
                     
-                # 3. ניתוח פעולת מחיר (נרות דיילי)
-                if len(df) >= 3:
+                # 3 + 4. ניתוח פעולת מחיר וממוצעים נעים
+                if len(df) >= 200:
                     c1, c2, c3 = df['Close'].iloc[-1], df['Close'].iloc[-2], df['Close'].iloc[-3]
                     o1, o2, o3 = df['Open'].iloc[-1], df['Open'].iloc[-2], df['Open'].iloc[-3]
                     
@@ -1080,13 +1082,26 @@ with tab_market_dir:
                         pa_status = "שורט"
                     else:
                         pa_status = "מעורב"
+                        
+                    # 4. הוספת תנאי ממוצעים נעים
+                    ma9 = df['Close'].rolling(9).mean().iloc[-1]
+                    ma100 = df['Close'].rolling(100).mean().iloc[-1]
+                    ma200 = df['Close'].rolling(200).mean().iloc[-1]
+                    
+                    if r1 and r2 and (c1 < ma100 or c1 < ma200):
+                        ma_status = "שורט"
+                    elif g1 and g2 and (c1 > ma9):
+                        ma_status = "לונג"
+                    else:
+                        ma_status = "מעורב"
                 else:
                     pa_status = "חסר נתונים"
+                    ma_status = "חסר נתונים"
                     
-                # שיקלול ותוצאה סופית
-                if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג":
+                # שיקלול ותוצאה סופית מעודכנת (חייב להתקיים גם תנאי הממוצעים)
+                if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג" and ma_status == "לונג":
                     verdict = "לונג"
-                elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט":
+                elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט" and ma_status == "שורט":
                     verdict = "שורט"
                 else:
                     verdict = "מעורב"
@@ -1108,6 +1123,11 @@ with tab_market_dir:
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
                         <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 ימי המסחר האחרונים</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים נעים</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{ma_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">תמיכות והתנגדויות</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
