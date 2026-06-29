@@ -311,7 +311,6 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        # מילוי ממוצעים חסרים מתמטית ולא אקראית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -331,58 +330,52 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת נתוני דוחות ופונדמנטלס ---
+        # --- משיכת נתוני דוחות (השוואת תחזית מול בפועל) בדיוק לפי הבקשה ---
+        earnings_text = "אין נתונים היסטוריים זמינים ביאהו"
+        earnings_badge = "לא זמין"
+        earnings_pos = None
+
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                now = pd.Timestamp.utcnow()
+                if ed.index.tz is None:
+                    ed.index = ed.index.tz_localize('UTC')
+                
+                # סינון 4 הרבעונים האחרונים שכבר דווחו
+                past_ed = ed[ed.index < now].head(4)
+                
+                if not past_ed.empty:
+                    beats = 0
+                    valid_quarters = 0
+                    for idx, row in past_ed.iterrows():
+                        rep = row.get('Reported EPS')
+                        est = row.get('EPS Estimate')
+                        if pd.notna(rep) and pd.notna(est):
+                            valid_quarters += 1
+                            if rep >= est:
+                                beats += 1
+                    
+                    if valid_quarters > 0:
+                        if beats == valid_quarters:
+                            earnings_text = "עמדה או עקפה את כל התחזיות בשנה האחרונה"
+                            earnings_badge = f"{beats}/{valid_quarters} הצלחה"
+                            earnings_pos = True
+                        else:
+                            misses = valid_quarters - beats
+                            earnings_text = f"לא פגעה בתחזית ב-{misses}/{valid_quarters} רבעונים אחרונים"
+                            earnings_badge = f"פספוס {misses}/{valid_quarters}"
+                            earnings_pos = False
+        except Exception:
+            pass
+
         info = {}
         try:
             info = t.info if hasattr(t, 'info') and t.info else {}
         except Exception:
             pass
-
-        earnings_text = "אין נתונים מספיקים להערכה"
-        earnings_badge = "לא זמין"
-        earnings_pos = None
-
-        q_growth = info.get("earningsQuarterlyGrowth")
-        if q_growth is not None:
-            val = round(q_growth * 100, 1)
-            if val > 0:
-                earnings_text = f"צמיחה רבעונית ברווחים של {val}%"
-                earnings_badge = "צמיחה"
-                earnings_pos = True
-            else:
-                earnings_text = f"נסיגה רבעונית ברווחים של {abs(val)}%"
-                earnings_badge = "נסיגה"
-                earnings_pos = False
-        else:
-            eps_trail = info.get('trailingEps')
-            eps_forw = info.get('forwardEps')
-            if eps_trail is not None and eps_forw is not None:
-                if eps_forw >= eps_trail:
-                    earnings_text = f"תחזית צמיחה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "צמיחה עתידית"
-                    earnings_pos = True
-                else:
-                    earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "ירידה עתידית"
-                    earnings_pos = False
-            else:
-                try:
-                    inc = t.quarterly_income_stmt
-                    if not inc.empty and "Net Income" in inc.index:
-                        ni = inc.loc["Net Income"].dropna()
-                        if len(ni) >= 2:
-                            if ni.iloc[0] > ni.iloc[1]:
-                                earnings_text = "שיפור ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "שיפור"
-                                earnings_pos = True
-                            else:
-                                earnings_text = "הרעה ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "הרעה"
-                                earnings_pos = False
-                except:
-                    pass
-
-        # --- אופציות אמת מהבורסה ---
+        
+        # --- חישוב יחס אופציות אמת מהבורסה ---
         options_text = "אין נתוני אופציות"
         try:
             opts = t.options
@@ -401,7 +394,7 @@ def analyze_ticker(ticker):
         except Exception:
             pass
 
-        # --- צמיחה בהכנסות ---
+        # --- צמיחה ---
         rev_growth = info.get("revenueGrowth")
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
@@ -412,7 +405,7 @@ def analyze_ticker(ticker):
                 forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
                 forecast_pos = False
         else:
-            forecast_text = "אין תחזית הכנסות זמינה"
+            forecast_text = "אין תחזית צמיחה זמינה"
             forecast_pos = None
 
         # --- המלצות אנליסטים אמת ---
@@ -803,7 +796,7 @@ with tab_short:
                         try:
                             ticker_sym = item["symbol"]
                             ticker_obj = yf.Ticker(ticker_sym, session=session)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_auto_adjust=True)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                             hist = hist.dropna(subset=["Volume"])
                             if len(hist) >= 20:
                                 avg_vol_3d = hist["Volume"].iloc[-3:].mean()
@@ -867,28 +860,9 @@ with tab_ai:
                     with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                         try:
                             genai.configure(api_key=GEMINI_API_KEY)
-                            
-                            # לוגיקה חכמה ובלתי ניתנת לקריסה ששואבת את הרשימה המדויקת שפתוחה אישית למפתח שלך
-                            available_models = []
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    available_models.append(m.name)
-                                    
-                            if not available_models:
-                                st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
-                            else:
-                                # בחירת המודל מתוך מה שגוגל מאשרת בפועל לאותו רגע
-                                chosen_model = available_models[0]
-                                for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
-                                    if preferred in available_models:
-                                        chosen_model = preferred
-                                        break
-                                        
-                                model = genai.GenerativeModel(chosen_model)
-                                prompt_text = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
-                                response = model.generate_content(prompt_text)
-                                st.session_state.ai_answer = response.text
-                                
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            response = model.generate_content(f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}")
+                            st.session_state.ai_answer = response.text
                         except Exception as e:
                             st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
                     
