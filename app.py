@@ -437,7 +437,7 @@ def do_scan(mode):
             
             if mode == "long":
                 yesterday_green = (close_2 > open_2)
-                not_at_ath = last < (ath * 0.92)
+                not_at_ath_long = last < (ath * 0.92)
 
                 if (last > ma9 and rsi < 70 and vol > 300_000
                         and not (last > ma100 and last > ma200 and last > ma9)
@@ -446,14 +446,20 @@ def do_scan(mode):
                         and last > prev
                         and yesterday_green
                         and recent_hammer_relaxed
-                        and not_at_ath): 
+                        and not_at_ath_long): 
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True, "strict_hammer": recent_hammer_strict})
             else:
-                two_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
+                three_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
+                
+                yesterday_red_star = is_shooting_star_yesterday and (close_2 < open_2)
+                today_red_lower = (close_1 < open_1) and (close_1 < close_2)
+                star_condition = yesterday_red_star and today_red_lower
+                
+                short_pattern = three_consecutive_down or star_condition
+                
+                not_at_ath_short = last < (ath * 0.95)
 
-                if (rsi > 30 and two_consecutive_down and vol > 1_000_000
-                        and close_1 < open_1
-                        and is_shooting_star_yesterday):
+                if (rsi > 30 and vol > 300_000 and short_pattern and not_at_ath_short):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -1158,12 +1164,11 @@ with tab_short:
   <div class="panel-title">רדאר שורט</div>
   <div class="panel-sub">סריקת מניות במומנטום יורד</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
-    <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
-    <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: כוכב נופל אתמול וסגירה אדומה היום</li>
+    <li><div class="crit-dot dot-red"></div>מגמת מחיר: רחוקה לפחות מ-5% משיא כל הזמנים</li>
+    <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
+    <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: 3 ימים יורדים ברצף או כוכב נופל אדום ולאחריו נר אדום נמוך יותר</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
-    <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
