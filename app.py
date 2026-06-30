@@ -251,7 +251,11 @@ def do_scan(mode):
             if df.empty or len(df) < 30:
                 continue
             
-            df = df.dropna(subset=["Close", "Open", "Volume"])
+            # וידוא שכל העמודות הנדרשות לפטיש/נרות קיימות
+            df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
+            if len(df) < 3:
+                continue
+                
             close = df["Close"]
             last  = float(close.iloc[-1])
             prev  = float(close.iloc[-2])
@@ -266,20 +270,35 @@ def do_scan(mode):
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
+            # --- משתני נרות להיום ולאתמול ---
+            open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
+            open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
+            
+            # חישובי גוף וזנבות עבור הנר של אתמול
+            body_2 = abs(close_2 - open_2)
+            lower_shadow_2 = min(open_2, close_2) - low_2
+            upper_shadow_2 = high_2 - max(open_2, close_2)
+            
+            # לוגיקה מתמטית: פטיש (Hammer) אתמול - זנב תחתון ארוך פי 2 מהגוף, זנב עליון קצר
+            is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+            
+            # לוגיקה מתמטית: כוכב נופל (Shooting Star) אתמול - זנב עליון ארוך פי 2 מהגוף, זנב תחתון קצר
+            is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
+            
             if mode == "long":
                 if (last > ma9 and prev > ma9_prev and rsi < 70 and vol > 1_000_000
                         and not (last > ma100 and last > ma200 and last > ma9)
-                        and float(close.iloc[-1]) > float(df["Open"].iloc[-1])
-                        and last > prev and chg > 0):
+                        and close_1 > open_1
+                        and last > prev and chg > 0
+                        and is_hammer_yesterday): # דרישה לנר פטיש אתמול
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
-                close_1 = float(close.iloc[-1])
-                close_2 = float(close.iloc[-2])
                 close_3 = float(close.iloc[-3])
                 two_consecutive_down = (close_1 < close_2) and (close_2 < close_3)
 
                 if (rsi > 30 and two_consecutive_down and vol > 1_000_000
-                        and float(close.iloc[-1]) < float(df["Open"].iloc[-1])):
+                        and close_1 < open_1
+                        and is_shooting_star_yesterday): # דרישה לכוכב נופל אתמול
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -716,7 +735,7 @@ with tab_long:
     <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-green"></div>מבנה נרות: המשכיות עולה</li>
+    <li><div class="crit-dot dot-green"></div>מבנה נרות: פטיש אתמול וסגירה ירוקה היום</li>
     <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
@@ -793,7 +812,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: המשכיות יורדת</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: כוכב נופל אתמול וסגירה אדומה היום</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
@@ -974,16 +993,21 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
+<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
