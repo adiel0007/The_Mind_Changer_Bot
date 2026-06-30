@@ -149,58 +149,129 @@ def get_session():
     })
     return s
 
-# --- מנגנון חכם ומתקדם לשאיבת אופציות העוקף את חסימות yfinance ---
+# ============================================================
+# === פונקציה מתוקנת לשליפת סנטימנט אופציות (התיקון שלך) ===
+# ============================================================
+@st.cache_data(ttl=900, show_spinner=False)  # קאשינג ל-15 דקות כדי לא להציף את יאהו ולהיחסם
 def fetch_options_sentiment(ticker_symbol):
+    """
+    שואב את יחס ה-Open Interest בין Calls ל-Puts עבור מניה נתונה.
+    הסיבה שזה נכשל בעבר: הבקשה ל-API הנסתר של יאהו דרשה "crumb token" תקף,
+    שלא היה מצורף לבקשה - מה שגרם לחסימה אוטומטית כמעט בכל פעם.
+    הפונקציה הזו מתקנת זאת ע"י קבלת cookies + crumb תקין לפני הבקשה,
+    סורקת כמה תאריכי פקיעה, ומוסיפה כמה שכבות גיבוי.
+    """
     calls_oi, puts_oi = 0, 0
-    
-    # ניסיון 1: מעקף מורחב ליאהו - גישה ישירה ל-API הנסתר שלהם (חסין כמעט לחלוטין)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+
+    # ───── שלב 1: ניסיון מלא ועם crumb token תקין (התיקון המרכזי) ─────
     try:
         session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': '*/*'
-        })
-        # ביקור בדף הראשי של המניה כדי למשוך Cookies + Crumb לתוך ה-Session
-        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=5)
-        
-        # קריאה ל-API של האופציות עם ה-Cookies החדשים
+        session.headers.update(headers)
+
+        # ביקור בדף הראשי כדי לקבל cookies תקפים
+        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=8)
+
+        # קבלת crumb token - בלעדיו יאהו חוסם את בקשת ה-API כמעט תמיד
+        crumb = ""
+        try:
+            crumb_res = session.get(
+                'https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=8
+            )
+            if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
+                crumb = crumb_res.text.strip()
+        except Exception:
+            pass
+
+        # קריאה ל-API של האופציות, עם crumb אם הצלחנו לקבל אותו
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
-        res = session.get(url, timeout=5)
-        
+        params = {"crumb": crumb} if crumb else {}
+        res = session.get(url, params=params, timeout=8)
+
         if res.status_code == 200:
             data = res.json()
-            opts = data.get('optionChain', {}).get('result', [])[0].get('options', [])[0]
-            
-            for c in opts.get('calls', []):
-                oi = c.get('openInterest')
-                if oi is not None: calls_oi += oi
-            for p in opts.get('puts', []):
-                oi = p.get('openInterest')
-                if oi is not None: puts_oi += oi
-                
-            if calls_oi > 0 or puts_oi > 0:
-                return calls_oi, puts_oi
-    except:
+            result = data.get('optionChain', {}).get('result', [])
+            if result:
+                # אוספים את כל תאריכי הפקיעה הזמינים ולא רק את הראשון
+                all_dates = result[0].get('expirationDates', [])
+                dates_to_scan = all_dates[:4] if all_dates else [None]
+
+                for exp_date in dates_to_scan:
+                    try:
+                        if exp_date:
+                            scan_url = f"{url}?date={exp_date}"
+                            if crumb:
+                                scan_url += f"&crumb={crumb}"
+                            scan_res = session.get(scan_url, timeout=8)
+                            scan_data = scan_res.json()
+                            opts_list = scan_data.get('optionChain', {}).get('result', [])
+                        else:
+                            opts_list = result
+
+                        if not opts_list:
+                            continue
+                        opts = opts_list[0].get('options', [])
+                        if not opts:
+                            continue
+                        opts = opts[0]
+
+                        for c in opts.get('calls', []):
+                            oi = c.get('openInterest')
+                            if oi is not None:
+                                calls_oi += oi
+                        for p in opts.get('puts', []):
+                            oi = p.get('openInterest')
+                            if oi is not None:
+                                puts_oi += oi
+                    except Exception:
+                        continue
+
+                if calls_oi > 0 or puts_oi > 0:
+                    return calls_oi, puts_oi
+    except Exception:
         pass
 
-    # ניסיון 2: רשת ביטחון דרך yfinance הרגיל במקרה שהראשון נכשל
+    # ───── שלב 2: רשת ביטחון - yfinance הרגיל עם session ייעודי ─────
     try:
-        t = yf.Ticker(ticker_symbol)
+        s2 = requests.Session()
+        s2.headers.update(headers)
+        t = yf.Ticker(ticker_symbol, session=s2)
         dates = t.options
         if dates:
-            # סורקים עד 3 פקיעות למקרה שבראשונה אין פעילות (נפוץ בנכסים קטנים)
-            for date in dates[:3]:
+            for date in dates[:4]:
                 try:
                     chain = t.option_chain(date)
                     if 'openInterest' in chain.calls.columns:
-                        calls_oi += chain.calls['openInterest'].fillna(0).sum()
+                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
                     if 'openInterest' in chain.puts.columns:
-                        puts_oi += chain.puts['openInterest'].fillna(0).sum()
-                except:
+                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+                except Exception:
                     continue
             if calls_oi > 0 or puts_oi > 0:
                 return calls_oi, puts_oi
-    except:
+    except Exception:
+        pass
+
+    # ───── שלב 3: ניסיון אחרון - yfinance ללא session מותאם (ברירת מחדל) ─────
+    try:
+        t2 = yf.Ticker(ticker_symbol)
+        dates2 = t2.options
+        if dates2:
+            for date in dates2[:2]:
+                try:
+                    chain2 = t2.option_chain(date)
+                    if 'openInterest' in chain2.calls.columns:
+                        calls_oi += int(chain2.calls['openInterest'].fillna(0).sum())
+                    if 'openInterest' in chain2.puts.columns:
+                        puts_oi += int(chain2.puts['openInterest'].fillna(0).sum())
+                except Exception:
+                    continue
+    except Exception:
         pass
 
     return calls_oi, puts_oi
