@@ -149,8 +149,18 @@ def get_session():
     })
     return s
 
-@st.cache_data(ttl=900, show_spinner=False)
+# ============================================================
+# === פונקציה מתוקנת לשליפת סנטימנט אופציות (התיקון שלך) ===
+# ============================================================
+@st.cache_data(ttl=900, show_spinner=False)  # קאשינג ל-15 דקות כדי לא להציף את יאהו ולהיחסם
 def fetch_options_sentiment(ticker_symbol):
+    """
+    שואב את יחס ה-Open Interest בין Calls ל-Puts עבור מניה נתונה.
+    הסיבה שזה נכשל בעבר: הבקשה ל-API הנסתר של יאהו דרשה "crumb token" תקף,
+    שלא היה מצורף לבקשה - מה שגרם לחסימה אוטומטית כמעט בכל פעם.
+    הפונקציה הזו מתקנת זאת ע"י קבלת cookies + crumb תקין לפני הבקשה,
+    סורקת כמה תאריכי פקיעה, ומוסיפה כמה שכבות גיבוי.
+    """
     calls_oi, puts_oi = 0, 0
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -159,11 +169,15 @@ def fetch_options_sentiment(ticker_symbol):
         'Accept-Language': 'en-US,en;q=0.9',
     }
 
+    # ───── שלב 1: ניסיון מלא ועם crumb token תקין (התיקון המרכזי) ─────
     try:
         session = requests.Session()
         session.headers.update(headers)
+
+        # ביקור בדף הראשי כדי לקבל cookies תקפים
         session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=8)
 
+        # קבלת crumb token - בלעדיו יאהו חוסם את בקשת ה-API כמעט תמיד
         crumb = ""
         try:
             crumb_res = session.get(
@@ -174,6 +188,7 @@ def fetch_options_sentiment(ticker_symbol):
         except Exception:
             pass
 
+        # קריאה ל-API של האופציות, עם crumb אם הצלחנו לקבל אותו
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
         params = {"crumb": crumb} if crumb else {}
         res = session.get(url, params=params, timeout=8)
@@ -182,6 +197,7 @@ def fetch_options_sentiment(ticker_symbol):
             data = res.json()
             result = data.get('optionChain', {}).get('result', [])
             if result:
+                # אוספים את כל תאריכי הפקיעה הזמינים ולא רק את הראשון
                 all_dates = result[0].get('expirationDates', [])
                 dates_to_scan = all_dates[:4] if all_dates else [None]
 
@@ -220,6 +236,7 @@ def fetch_options_sentiment(ticker_symbol):
     except Exception:
         pass
 
+    # ───── שלב 2: רשת ביטחון - yfinance הרגיל עם session ייעודי ─────
     try:
         s2 = requests.Session()
         s2.headers.update(headers)
@@ -240,6 +257,7 @@ def fetch_options_sentiment(ticker_symbol):
     except Exception:
         pass
 
+    # ───── שלב 3: ניסיון אחרון - yfinance ללא session מותאם (ברירת מחדל) ─────
     try:
         t2 = yf.Ticker(ticker_symbol)
         dates2 = t2.options
@@ -418,8 +436,10 @@ def do_scan(mode):
     return results
 
 def normalize_ticker(raw_ticker):
+    """מנקה ומתקנן סימול שהוקלד ע"י המשתמש כך שיתאים לפורמט שיאהו מצפה לו.
+    לדוגמה: רווחים מיותרים, ונקודה בסימולי מניות-משנה (BRK.B -> BRK-B)."""
     t = raw_ticker.strip().upper()
-    if t.startswith("^"):
+    if t.startswith("^"):  # מדדים כמו ^GSPC נשארים כמו שהם
         return t
     t = t.replace(" ", "")
     if "." in t:
@@ -428,6 +448,8 @@ def normalize_ticker(raw_ticker):
 
 
 def _fetch_history_with_retry(ticker, attempts=3):
+    """מנסה למשוך נתוני היסטוריה עם מספר ניסיונות חוזרים ושיטות שונות,
+    כדי שכשלון זמני (rate limit/timeout) לא יגרום ל'סימול שגוי' מזויף."""
     last_error = None
     for i in range(attempts):
         try:
@@ -439,6 +461,7 @@ def _fetch_history_with_retry(ticker, attempts=3):
         except Exception as e:
             last_error = e
 
+        # ניסיון גיבוי דרך yf.download באותו סיבוב
         try:
             df2 = yf.download(ticker, period="1y", interval="1d", progress=False, threads=False)
             if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
@@ -452,12 +475,14 @@ def _fetch_history_with_retry(ticker, attempts=3):
         except Exception as e:
             last_error = e
 
-        time.sleep(1.5 * (i + 1))
+        time.sleep(1.5 * (i + 1))  # backoff הולך וגדל בין ניסיונות
 
     return pd.DataFrame(), None, last_error
 
 
 def _get_yahoo_crumb_session():
+    """יוצרת session עם cookies + crumb token תקין מול יאהו.
+    זהו הבסיס המשותף לכל בקשות ה-API הנסתרות (אופציות, נתוני יסוד וכו')."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -486,6 +511,10 @@ def _get_yahoo_crumb_session():
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_fundamentals(ticker_symbol):
+    """
+    מושך נתוני יסוד (דוחות, תחזיות, המלצות אנליסטים) ישירות מ-quoteSummary של יאהו,
+    עם crumb token תקין ועד 3 ניסיונות חוזרים - במקום t.info השביר שנכשל בלי אזהרה.
+    """
     modules = "financialData,defaultKeyStatistics,earningsTrend,recommendationTrend,summaryDetail,earningsHistory"
     merged = {}
 
@@ -520,6 +549,7 @@ def fetch_fundamentals(ticker_symbol):
                     merged["trailingEps"] = _raw(stats, "trailingEps")
                     merged["forwardEps"] = _raw(stats, "forwardEps")
 
+                    # ── היסטוריית עמידה בתחזיות (Earnings Beat/Miss) - עד 4 רבעונים אחרונים ──
                     quarters = earn_hist.get("history", []) or []
                     beat_list = []
                     for q in quarters:
@@ -527,7 +557,7 @@ def fetch_fundamentals(ticker_symbol):
                         estimate = _raw(q, "epsEstimate")
                         if actual is not None and estimate is not None:
                             beat_list.append(actual >= estimate)
-                    merged["earnings_beat_list"] = beat_list[-4:]
+                    merged["earnings_beat_list"] = beat_list[-4:]  # 4 הרבעונים האחרונים בלבד
 
                     if any(v is not None for v in merged.values() if not isinstance(v, list)) or beat_list:
                         return merged
@@ -535,6 +565,7 @@ def fetch_fundamentals(ticker_symbol):
             pass
         time.sleep(1.2 * (attempt + 1))
 
+    # ───── גיבוי: ניסיון דרך yfinance הרגיל אם הבקשה הידנית נכשלה ─────
     try:
         t_fallback = yf.Ticker(ticker_symbol, session=get_session())
         info = t_fallback.info or {}
@@ -565,9 +596,10 @@ def analyze_ticker(ticker):
         df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
 
         if df.empty or len(df) < 30:
+            # ניסיון אחרון - לבדוק אם הסימול בכלל קיים (כדי להבחין בין סימול שגוי לתקלת רשת)
             try:
                 test_info = yf.Ticker(clean_ticker).fast_info
-                _ = test_info.last_price
+                _ = test_info.last_price  # אם זה עובד, הסימול תקין אבל הייתה תקלת רשת זמנית
                 return {"_error": "network"}
             except Exception:
                 return {"_error": "invalid"}
@@ -575,6 +607,8 @@ def analyze_ticker(ticker):
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
 
+        # ── מחיר נוכחי אמיתי: נשלף בנפרד מ-fast_info ולא מה-history, ──
+        # ── כדי שלא יוצג מחיר מותאם/מושהה ולא יהיה פער מהמחיר האמיתי ──
         last = float(close.iloc[-1])
         prev = float(close.iloc[-2])
         try:
@@ -586,7 +620,7 @@ def analyze_ticker(ticker):
                     last = live_price
                     prev = live_prev_close
         except Exception:
-            pass
+            pass  # אם fast_info נכשל, נישאר עם הערכים מה-history כגיבוי
 
         chg = round(((last - prev) / prev) * 100, 2)
         rsi = calculate_rsi(close)
@@ -641,6 +675,7 @@ def analyze_ticker(ticker):
                 earnings_text = f"המניה עמדה בתחזית האנליסטים רק ב-{beats} מתוך {total_q} הרבעונים האחרונים"
                 earnings_pos = False
 
+        # --- משיכת אופציות ישירות עם הפונקציה החכמה שעוקפת חסימות ---
         options_text = "אין נתוני אופציות"
         calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
@@ -688,8 +723,8 @@ def analyze_ticker(ticker):
             rec_pos = None
 
         ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
-        trend_up = last > ma9_val
-        up = chg >= 0
+        trend_up = last > ma9_val  # משמש רק לטקסט המגמה (לונג/שורט), לא לתג עלה/ירד
+        up = chg >= 0  # התג "עלה/ירד" תמיד תואם בדיוק לאחוז השינוי המוצג
         trend_status = "שורי (דומיננטיות קונים ברורה)" if trend_up else "דובי (לחץ מוכרים מוגבר)"
         
         formatted_opinion = (
@@ -721,6 +756,7 @@ def analyze_ticker(ticker):
             "summary_text": formatted_opinion
         }
     except Exception as e:
+        # כשל לא צפוי (לרוב חיבור/timeout) - לא נסמן כסימול שגוי כדי לא להטעות את המשתמש
         return {"_error": "network"}
 
 def render_cards(data, mode):
@@ -745,71 +781,52 @@ def render_analysis(d):
     
     tag_cls = "tag-green" if d.get("up", True) else "tag-red"
     chg_color = "#16a34a" if d.get("up") else "#dc2626"
-    tag_border = "#16a34a" if d.get("up") else "#dc2626"
-    tag_bg = "rgba(22, 163, 74, 0.15)" if d.get("up") else "rgba(220, 38, 38, 0.15)"
     
-    def make_metric_card(label, val_text, badge_text="", is_pos=None):
-        if is_pos is True:
-            badge_bg, badge_color, badge_border = "rgba(22, 163, 74, 0.15)", "#16a34a", "rgba(22, 163, 74, 0.3)"
-        elif is_pos is False:
-            badge_bg, badge_color, badge_border = "rgba(220, 38, 38, 0.15)", "#dc2626", "rgba(220, 38, 38, 0.3)"
-        else:
-            badge_bg, badge_color, badge_border = "rgba(255, 255, 255, 0.05)", "#9a8f7a", "rgba(255, 255, 255, 0.1)"
-            
-        badge_html = f'<span style="padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; background: {badge_bg}; color: {badge_color}; border: 1px solid {badge_border}; white-space: nowrap;">{badge_text}</span>' if badge_text else ""
+    rsi_pos = d.get("rsi_pos")
+    ma_pos = d.get("ma_pos")
+    earnings_pos = d.get("earnings_pos")
+    forecast_pos = d.get("forecast_pos")
+    rec_pos = d.get("rec_pos")
+    
+    def make_row(label, val_text, badge_text="", is_pos=None):
+        badge_html = ""
+        if badge_text:
+            if is_pos is True:
+                bg = "rgba(22, 163, 74, 0.15); color: #16a34a;"
+            elif is_pos is False:
+                bg = "rgba(220, 38, 38, 0.15); color: #dc2626;"
+            else:
+                bg = "rgba(255, 255, 255, 0.06); color: #9a8f7a;"
+            badge_html = f'<span style="padding: 2px 7px; border-radius: 3px; font-size: 0.68rem; font-weight: 700; margin-right: 8px; background: {bg};">{badge_text}</span>'
         
         return (
-            f'<div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; justify-content: center; gap: 8px; transition: transform 0.2s, background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">'
-            f'<div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">'
-            f'<span style="font-size: 0.75rem; color: #7a7060; font-weight: 600; letter-spacing: 0.05em;">{label}</span>'
+            f'<div style="display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); direction: rtl;">'
+            f'<span style="font-size: 0.78rem; color: #7a7060; font-weight: 500;">{label}</span>'
+            f'<div style="display: flex; align-items: center; gap: 4px; direction: ltr; text-align: left;">'
             f'{badge_html}'
-            f'</div>'
-            f'<div style="font-size: 0.95rem; color: #f0ede6; font-weight: 600; font-family: \'Inter\', sans-serif; line-height: 1.3;">{val_text}</div>'
-            f'</div>'
+            f'<span style="font-size: 0.78rem; color: #f0ede6; font-weight: 600; font-family: \'Inter\', sans-serif;">{val_text}</span>'
+            f'</div></div>'
         )
 
-    # יצירת כרטיסיות הנתונים
-    metrics_grid = (
-        make_metric_card("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), d.get("rsi_pos")) +
-        make_metric_card("ממוצעים נעים", d.get("ma_status", ""), "מגמת מאקרו", d.get("ma_pos")) +
-        make_metric_card("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) +
-        make_metric_card("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), d.get("earnings_pos")) +
-        make_metric_card("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", d.get("forecast_pos")) +
-        make_metric_card("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), d.get("rec_pos"))
+    rows_html = (
+        make_row("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), rsi_pos) +
+        make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", ma_pos) +
+        make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) +
+        make_row("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), earnings_pos) +
+        make_row("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", forecast_pos) +
+        make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), rec_pos)
     )
 
-    # תוכן הבינה המלאכותית (הדינמי שנוסיף בשלב 2)
-    ai_content = d.get("dynamic_ai_text", d.get("summary_text", ""))
-
     html = (
-        f'<div style="background: linear-gradient(145deg, #141410, #0a0a08); border: 1px solid rgba(201,168,76,0.2); border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); padding: 24px; margin-top: 20px; direction: rtl;">'
-        
-        # Header (Ticker, Price, Tag)
-        f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(201,168,76,0.15); padding-bottom: 16px; margin-bottom: 20px;">'
-        f'<div style="display: flex; align-items: center; gap: 16px;">'
-        f'<h2 style="font-family: \'Playfair Display\', serif; font-size: 2.2rem; font-weight: 900; color: #f0ede6; margin: 0; line-height: 1;">{d.get("ticker", "")}</h2>'
-        f'<div style="display: flex; flex-direction: column;">'
-        f'<span style="font-family: \'Inter\', sans-serif; font-size: 1.4rem; font-weight: 700; color: #c9a84c; line-height: 1.2;">{d.get("price", "")}</span>'
-        f'<span style="color: {chg_color}; font-size: 0.85rem; font-weight: 600;">{d.get("chg", "")}</span>'
-        f'</div></div>'
-        f'<div style="background: {tag_bg}; color: {chg_color}; padding: 6px 14px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; border: 1px solid {tag_border}; box-shadow: 0 0 15px {tag_bg}; letter-spacing: 0.05em;">{d.get("momentum", "")}</div>'
-        f'</div>'
-        
-        # Metrics Grid
-        f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px;">'
-        f'{metrics_grid}'
-        f'</div>'
-        
-        # AI Insight Section
-        f'<div style="position: relative; background: rgba(201,168,76,0.05); border: 1px solid rgba(201,168,76,0.2); border-radius: 8px; padding: 24px; overflow: hidden;">'
-        f'<div style="position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: #c9a84c; box-shadow: 0 0 10px #c9a84c;"></div>'
-        f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">'
-        f'<span style="font-size: 1.2rem;">🧠</span>'
-        f'<span style="font-size: 0.85rem; font-weight: 800; color: #c9a84c; letter-spacing: 0.08em; text-transform: uppercase;">מסקנות והמלצות המודל — THE MIND CHANGER</span>'
-        f'</div>'
-        f'<div style="font-size: 0.9rem; color: #f0ede6; line-height: 1.8; font-weight: 400; text-align: right;">{ai_content}</div>'
-        f'</div>'
-        f'</div>'
+        f'<div class="result-card" style="border: 1px solid rgba(201,168,76,0.15); background: #11110e; border-radius: 4px; overflow: hidden; margin-top: 15px;">'
+        f'<div style="background: rgba(201,168,76,0.04); padding: 14px 16px; border-bottom: 1px solid rgba(201,168,76,0.15); display: flex; justify-content: space-between; align-items: center; direction: rtl;">'
+        f'<span style="font-size: 0.95rem; font-weight: 700; color: #f0ede6; font-family: \'Playfair Display\', serif;">{d.get("ticker", "")} &nbsp; <span style="font-family: \'Inter\'; color:#c9a84c;">{d.get("price", "")}</span>'
+        f'<small style="color: {chg_color}; font-size: 0.75rem; margin-right: 6px; font-family: \'Inter\'; font-weight:600;">{d.get("chg", "")}</small></span>'
+        f'<span class="result-tag {tag_cls}" style="font-size: 0.65rem; font-weight: 700; padding: 3px 9px; border-radius: 3px;">{d.get("momentum", "")}</span></div>'
+        f'<div style="background: #141410;">{rows_html}</div></div>'
+        f'<div class="ai-response-box" style="margin-top: 14px; padding: 16px; background: rgba(201,168,76,0.04); border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; border-radius: 4px;">'
+        f'<div class="ai-response-label" style="font-size: 0.7rem; font-weight: 700; color: #c9a84c; letter-spacing: 0.05em; margin-bottom: 6px;">📋 ניתוח ומסקנות מודל — THE MIND CHANGER</div>'
+        f'<div class="ai-response-text" style="font-size: 0.82rem; color: #f0ede6; line-height: 1.7; font-weight:400; direction: rtl; text-align: right;">{d.get("summary_text", "")}</div></div>'
     )
     return html
 
@@ -1148,13 +1165,13 @@ with tab_ai:
 
         if stop_ai:
             st.stop()
-        
         if run_ai:
             if ticker_val:
                 ticker_clean = ticker_val.upper().strip()
                 with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
                     res = analyze_ticker(ticker_clean)
 
+                    # אם הייתה תקלת רשת זמנית (לא סימול שגוי) - ננסה שוב אוטומטית עד פעמיים נוספות
                     retry_count = 0
                     while isinstance(res, dict) and res.get("_error") == "network" and retry_count < 2:
                         time.sleep(2)
@@ -1162,24 +1179,377 @@ with tab_ai:
                         retry_count += 1
 
                     if res and not (isinstance(res, dict) and "_error" in res):
-                        # --- תוספת חדשה: קריאה דינמית ל-Gemini עבור המסקנות ---
-                        if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
-                            try:
-                                genai.configure(api_key=GEMINI_API_KEY)
-                                model = genai.GenerativeModel('gemini-1.5-flash')
-                                
-                                prompt = f"""
-                                אתה אנליסט פיננסי בכיר ואלגוטריידר מקצועי במערכת 'The Mind Changer'. 
-                                הנה נתונים טכניים ופונדמנטליים שחילצנו הרגע על המניה {res['ticker']}:
-                                - מחיר: {res['price']} (שינוי: {res['chg']})
-                                - ממוצעים נעים (מגמת מאקרו): {res['ma_status']}
-                                - מתנד RSI: עומד על {res['rsi_val_num']:.1f} ({res['rsi_status']})
-                                - סנטימנט פעילות אופציות: {res['options_text']}
-                                - עמידה ביעדי דוחות: {res['earnings']}
-                                - צפי להכנסות בעתיד: {res['forecast_text']}
-                                - קונצנזוס אנליסטים: {res['rec_text']}
+                        st.session_state.analysis = res
+                    else:
+                        st.session_state.analysis = None
+                        if isinstance(res, dict) and res.get("_error") == "invalid":
+                            st.error(f"הסימול '{ticker_clean}' לא נמצא. ודא שכתבת אותו נכון (לדוגמה: AAPL, TSLA, BRK-B).")
+                        else:
+                            st.error("יאהו פיננס עמוס כרגע ולא הצליח להחזיר נתונים אחרי כמה ניסיונות. המתן רגע ולחץ שוב על 'נתח מניה'.")
+                        
+        if st.session_state.analysis:
+            analysis_html = render_analysis(st.session_state.analysis)
+            st.markdown(analysis_html, unsafe_allow_html=True)
 
-                                עליך לכתוב פסקה או שתיים של מסקנות והמלצות מסחר ברורות, חדות ומקצועיות על בסיס הנתונים האלו.
-                                הוסף תובנה קצרה משלך על מצב המניה, הסקטור שלה, או אינדיקציות קנייה/מכירה הנובעות משילוב הנתונים (למשל, התנגשות בין פונדמנטלס טובים למצב טכני של קניית יתר).
-                                סכם בשורת מחץ "שורה תחתונה".
-                                החזר את התשובה בפורמט HTML נקי (השתמש ב- <b> להדגשות, <br> לירידת שורה) שיוצג ישירות באתר, ללא תגיות Markdown או
+    with col2:
+        st.markdown("""
+<div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:10px;">
+  <div class="panel-title">שאלות כלליות</div>
+  <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
+</div>""", unsafe_allow_html=True)
+        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="כמה כסף זה ב-3 שנים אם אני משקיע...", label_visibility="collapsed")
+        
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+            run_qa = st.button("שאל", key="qa_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with btn_col2:
+            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+            stop_qa = st.button("עצור 🛑", key="stop_qa_trigger")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if stop_qa:
+            st.stop()
+        if run_qa:
+            if qa_val:
+                q = qa_val.strip()
+                
+                if not GENAI_AVAILABLE or GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
+                    st.session_state.ai_answer = (
+                        "<b>⚠️ חיבור חסר למערכת ה-AI:</b><br/><br/>"
+                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל ולענות על שאלות חופשיות, עליך להדביק את מפתח ה-API החוקי שלך בהגדרות הסודות של השרת.<br/><br/>"
+                        "<i>(עד אז, המערכת תספק תשובות בסיסיות רק למונחים כמו RSI, שורט או ממוצעים).</i>"
+                    )
+                else:
+                    with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
+                        try:
+                            genai.configure(api_key=GEMINI_API_KEY)
+                            
+                            available_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    available_models.append(m.name)
+                                    
+                            if not available_models:
+                                st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
+                            else:
+                                chosen_model = available_models[0]
+                                for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
+                                    if preferred in available_models:
+                                        chosen_model = preferred
+                                        break
+                                        
+                                model = genai.GenerativeModel(chosen_model)
+                                prompt_text = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
+                                response = model.generate_content(prompt_text)
+                                st.session_state.ai_answer = response.text
+                                
+                        except Exception as e:
+                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
+                            
+        if st.session_state.ai_answer:
+            st.markdown(f"""
+<div class="ai-response-box" style="margin-top:12px; min-height: 160px; border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; background: #11110e;">
+  <div class="ai-response-label" style="color: #c9a84c; font-weight: 700;">💡 מרכז המידע — THE MIND CHANGER</div>
+  <div class="ai-response-text" style="color: #f0ede6; font-size: 0.82rem; line-height: 1.7; direction: rtl; text-align: right;">{st.session_state.ai_answer}</div>
+</div>""", unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ── 1. טאב מעודכן: שעון הפחד והגרידיות - עיצוב מחולק למקטעים בסגנון CNN ──
+with tab_fear_greed:
+    fg_val, fg_rating = get_fear_greed_data()
+    needle_angle = (fg_val / 100) * 180 - 90
+    
+    col_img, col_txt = st.columns([1, 1])
+    with col_img:
+        html_gauge = f"""<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; text-align: center; margin-top: 15px; min-height: 380px;">
+<h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
+<p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
+<div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
+<div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
+<div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
+<div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
+<div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
+<span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
+</div>
+<!-- מחוג משודרג ומעוצב -->
+<div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
+<div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
+</div>
+</div>
+<div style="margin-top: 25px;">
+<span style="font-size: 0.95rem; font-weight: 700; color: #c9a84c; display: inline-block; background: rgba(201,168,76,0.06); padding: 6px 16px; border-radius: 3px; border: 1px solid rgba(201,168,76,0.15);">סטטוס שוק: {fg_rating}</span>
+</div>
+</div>"""
+        st.markdown(html_gauge, unsafe_allow_html=True)
+        
+    with col_txt:
+        html_text = """<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
+<h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
+<p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
+מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+</p>
+<h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
+<ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
+<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
+<li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
+<li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
+</ul>
+</div>"""
+        st.markdown(html_text, unsafe_allow_html=True)
+
+# ── כרטיסייה חדשה: לאן השוק הולך ──
+with tab_market_dir:
+    st.markdown("""
+<div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
+  <div class="panel-title">התמונה הגדולה: מדד ה-QQQ</div>
+  <div class="panel-sub">סריקה וניתוח משולב של מדד הנאסד"ק לאיתור מגמת השוק וסינון עסקאות</div>
+</div>""", unsafe_allow_html=True)
+    
+    btn_col1, btn_col2 = st.columns([3, 1])
+    with btn_col1:
+        st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+        run_qqq = st.button("התחל ניתוח נאסד\"ק 🚀", key="analyze_qqq_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with btn_col2:
+        st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+        stop_qqq = st.button("עצור 🛑", key="stop_qqq_btn")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if stop_qqq:
+        st.stop()
+        
+    if run_qqq:
+        with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
+            try:
+                session = get_session()
+                qqq = yf.Ticker("QQQ", session=session)
+                
+                # משיכת נתוני הגרף בנפרד (מוגן חסימות)
+                try:
+                    df = qqq.history(period="2y", interval="1d", auto_adjust=True)
+                except:
+                    df = pd.DataFrame()
+                
+                if df.empty:
+                    try:
+                        df = yf.download("QQQ", period="2y", interval="1d", progress=False)
+                    except:
+                        pass
+                
+                if not df.empty and isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                    
+                if df.empty or "Close" not in df.columns:
+                    st.error("הבורסה חסמה זמנית את הבקשות לגרפים (Rate Limit). המתן כמה דקות ונסה שוב.")
+                    st.stop()
+                    
+                df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
+                
+                # 1. משיכת אופציות דרך המעקף שיצרנו
+                calls_oi, puts_oi = fetch_options_sentiment("QQQ")
+                
+                total_oi = calls_oi + puts_oi
+                if total_oi > 0:
+                    call_pct = (calls_oi / total_oi * 100)
+                    put_pct = (puts_oi / total_oi * 100)
+                    opt_status = "קולים" if call_pct > put_pct else "פוטים"
+                else:
+                    call_pct, put_pct = 50.0, 50.0
+                    opt_status = "לא זמין"
+                
+                # 2. חישוב מתנד RSI
+                rsi_val = calculate_rsi(df['Close'])
+                if rsi_val > 70:
+                    rsi_status = "קניית יתר"
+                elif rsi_val < 30:
+                    rsi_status = "מכירת יתר"
+                else:
+                    rsi_status = "ניטרלי"
+                    
+                # 3 + 4. ניתוח פעולת מחיר וממוצעים נעים
+                if len(df) >= 200:
+                    c1, c2, c3 = float(df['Close'].iloc[-1]), float(df['Close'].iloc[-2]), float(df['Close'].iloc[-3])
+                    o1, o2, o3 = float(df['Open'].iloc[-1]), float(df['Open'].iloc[-2]), float(df['Open'].iloc[-3])
+                    h2, l2 = float(df['High'].iloc[-2]), float(df['Low'].iloc[-2])
+                    
+                    g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
+                    r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
+                    
+                    # חישובי נרות לאתמול עבור זיהוי תבניות היפוך
+                    body_2 = abs(c2 - o2)
+                    lower_shadow_2 = min(o2, c2) - l2
+                    upper_shadow_2 = h2 - max(o2, c2)
+                    
+                    is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+                    is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
+                    
+                    is_red_hammer_or_star = r2 and (is_hammer_yesterday or is_shooting_star_yesterday)
+                    
+                    is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2) or (g1 and is_hammer_yesterday)
+                    is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2) or (r1 and is_red_hammer_or_star)
+                    
+                    if is_long:
+                        pa_status = "לונג"
+                    elif is_short:
+                        pa_status = "שורט"
+                    else:
+                        pa_status = "מעורב"
+                        
+                    # 4. ממוצעים נעים
+                    ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
+                    ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
+                    ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
+                    
+                    if r1 and r2 and (c1 < ma100 or c1 < ma200):
+                        ma_status = "שורט"
+                    elif g1 and g2 and (c1 > ma9):
+                        ma_status = "לונג"
+                    else:
+                        ma_status = "מעורב"
+                else:
+                    pa_status = "חסר נתונים"
+                    ma_status = "חסר נתונים"
+                    
+                # שיקלול ותוצאה סופית
+                if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג" and ma_status == "לונג":
+                    verdict = "לונג"
+                elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט" and ma_status == "שורט":
+                    verdict = "שורט"
+                else:
+                    verdict = "מעורב"
+                    
+                # הצגת המדדים על המסך
+                st.markdown(f"""
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; direction: rtl;">
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">1. סנטימנט אופציות</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">רוב {opt_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">קולים: {call_pct:.1f}% | פוטים: {put_pct:.1f}%</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">2. מומנטום (RSI)</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{rsi_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">ערך נוכחי: {rsi_val:.1f}</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 הימים האחרונים (כולל זיהוי פטישים)</div>
+                    </div>
+                    <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים נעים</div>
+                        <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{ma_status}</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">תמיכות והתנגדויות</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # הצגת הבאנר הגרפי בהתאם לתוצאה
+                if verdict == "לונג":
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);">
+                        <div style="font-size: 4rem; margin-bottom: 10px;">🚀 🟢</div>
+                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 20px rgba(22,163,74,0.4); letter-spacing: 0.05em;">השוק לונג</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על מומנטום חיובי ושליטת קונים בנאסד"ק. חפש הזדמנויות לונג.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif verdict == "שורט":
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(220,38,38,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #dc2626; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(220,38,38,0.15);">
+                        <div style="font-size: 4rem; margin-bottom: 10px;">🩸 🔴</div>
+                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 20px rgba(220,38,38,0.4); letter-spacing: 0.05em;">השוק בשורט</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על חולשה מהותית ושליטת מוכרים בנאסד"ק. חפש הזדמנויות שורט.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, rgba(201,168,76,0.05) 0%, rgba(10,10,8,1) 100%); border: 1px solid rgba(201,168,76,0.3); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px;">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">⚖️</div>
+                        <div style="font-size: 2.2rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #c9a84c; letter-spacing: 0.05em;">מגמה מעורבת</div>
+                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">אין כרגע איתות מובהק וחד משמעי לכיוון השוק. מומלץ להמתין למבנה ברור יותר.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            except Exception as e:
+                st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
+
+# ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
+bottom_html = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head><meta charset="UTF-8"/><style>
+body{background:#0a0a08;color:#f0ede6;font-family:'Inter',sans-serif;direction:rtl;margin:0}
+.section-wrap{padding:64px 40px;max-width:1200px;margin:0 auto}
+.section-eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.eyebrow-line{width:28px;height:1px;background:#c9a84c}
+.eyebrow-text{font-size:0.68rem;font-weight:600;letter-spacing:0.16em;color:#c9a84c;text-transform:uppercase}
+.section-title{font-family:'Playfair Display',serif;font-size:clamp(1.5rem,2.5vw,2.2rem);font-weight:900;color:#f0ede6;margin-bottom:8px}
+.section-desc{color:#9a8f7a;font-size:0.88rem;max-width:480px;line-height:1.65;margin-bottom:40px}
+#features{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12)}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.12)}
+.feat-card{background:#0f0f0c;padding:28px 24px;transition:background .2s}
+.feat-card:hover{background:#141410}
+.feat-icon{font-size:1.3rem;margin-bottom:14px;display:block}
+.feat-title{font-family:'Playfair Display',serif;font-size:0.95rem;font-weight:700;color:#f0ede6;margin-bottom:6px}
+.feat-desc{font-size:0.78rem;color:#7a7060;line-height:1.6}
+#how{border-top:1px solid rgba(201,168,76,0.12)}
+.steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid rgba(201,168,76,0.12);background:rgba(201,168,76,0.12)}
+.step-card{background:#141410;padding:32px 24px}
+.step-num{font-family:'Playfair Display',serif;font-size:2.5rem;font-weight:900;color:rgba(201,168,76,0.12);line-height:1;margin-bottom:16px}
+.step-title{font-family:'Playfair Display',serif;font-size:0.95rem;font-weight:700;color:#f0ede6;margin-bottom:8px}
+.step-desc{font-size:0.78rem;color:#7a7060;line-height:1.6}
+footer{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12);padding:36px 40px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.footer-logo{font-family:'Playfair Display',serif;font-size:1rem;font-weight:700;color:#c9a84c;margin-bottom:6px}
+.footer-copy{font-size:0.72rem;color:#7a7060}
+.footer-links{display:flex;gap:24px}
+.footer-links a{{font-size:0.72rem;color:#7a7060;text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer}}
+.footer-links a:hover{{color:#c9a84c}}
+</style></head>
+<body>
+<section id="features" style="padding:0">
+  <div class="section-wrap" style="padding-bottom:0">
+    <div class="section-eyebrow"><div class="eyebrow-line"></div><div class="eyebrow-text">יתרונות</div></div>
+    <h2 class="section-title">למה The Mind Changer?</h2>
+    <p class="section-desc">כל מה שצריך לקבל החלטות מסחר חכמות יותר</p>
+  </div>
+  <div class="features-grid">
+    <div class="feat-card"><span class="feat-icon">⚡</span><div class="feat-title">סריקה בזמן אמת</div><div class="feat-desc">מנתח מאות מניות לפי קריטריונים טכניים מוכחים</div></div>
+    <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה עם RSI, ממוצעים נעים ונרות</div></div>
+    <div class="feat-card"><span class="feat-icon">📉</span><div class="feat-title">רדאר שורט</div><div class="feat-desc">מאתר מניות חלשות עם Puts חזקים ומגמה יורדת</div></div>
+    <div class="feat-card"><span class="feat-icon">📊</span><div class="feat-title">14 אינדיקטורים</div><div class="feat-desc">RSI, MA9/100/200, אופציות, המלצות אנליסטים ועוד</div></div>
+    <div class="feat-card"><span class="feat-icon">🔒</span><div class="feat-title">נתונים מאובטחים</div><div class="feat-desc">עקיפת Rate Limits חכמה עם Session דינמי</div></div>
+    <div class="feat-card"><span class="feat-icon">🤖</span><div class="feat-title">ניתוח AI</div><div class="feat-desc">נתונים טכניים אמיתיים לכל מניה שתבחר</div></div>
+  </div>
+</section>
+<section id="how">
+  <div class="section-wrap">
+    <div class="section-eyebrow"><div class="eyebrow-line"></div><div class="eyebrow-text">תהליך</div></div>
+    <h2 class="section-title">איך זה עובד?</h2>
+    <p class="section-desc">שלושה שלבים פשוטים לתוצאות חכמות</p>
+    <div class="steps-grid">
+      <div class="step-card"><div class="step-num">01</div><div class="step-title">בחר מצב סריקה</div><div class="step-desc">לונג, שורט, או ניתוח מניה בודדת. המערכת אוספת נתונים בזמן אמת.</div></div>
+      <div class="step-card"><div class="step-num">02</div><div class="step-title">סריקה אלגוריתמית</div><div class="step-desc">האלגוריתם בודק RSI, ממוצעים נעים, נפח מסחר ונרות עבור כל מניה.</div></div>
+      <div class="step-card"><div class="step-num">03</div><div class="step-title">קבל תוצאות אמיתיות</div><div class="step-desc">מניות שעוברות את הקריטריונים מוצגות עם מחיר ואחוז שינוי עדכניים.</div></div>
+    </div>
+  </div>
+</section>
+<footer>
+  <div>
+    <div class="footer-logo">The Mind Changer</div>
+    <div class="footer-copy">2026 — למטרות מידע בלבד. אינו ייעוץ השקעות.</div>
+  </div>
+</footer>
+</body>
+</html>"""
+
+st.components.v1.html(bottom_html, height=710, scrolling=False)
