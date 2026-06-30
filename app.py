@@ -812,7 +812,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: כוכב נופל אתמול וסגירה אדומה היום</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: פטיש אדום אתמול וסגירה אדומה היום</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
@@ -1060,7 +1060,7 @@ with tab_market_dir:
                 qqq = yf.Ticker("QQQ")
                 # שינינו ל-2y כדי שיהיה מספיק מידע לממוצע נע 200
                 df = qqq.history(period="2y", interval="1d")
-                df = df.dropna(subset=['Close', 'Open'])
+                df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 opts = qqq.options
                 
                 # 1. בדיקת סנטימנט אופציות
@@ -1091,18 +1091,31 @@ with tab_market_dir:
                 if len(df) >= 200:
                     c1, c2, c3 = df['Close'].iloc[-1], df['Close'].iloc[-2], df['Close'].iloc[-3]
                     o1, o2, o3 = df['Open'].iloc[-1], df['Open'].iloc[-2], df['Open'].iloc[-3]
+                    h2, l2 = df['High'].iloc[-2], df['Low'].iloc[-2]
                     
                     g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
                     r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
                     
-                    # 3 נרות ירוקים רצופים או 2 נרות ירוקים שהאחרון גבוה מקודמו
-                    is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2)
-                    # 3 נרות אדומים רצופים או 2 נרות אדומים שהאחרון נמוך מקודמו
-                    is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2)
+                    # חישוב פטיש לאתמול
+                    body_2 = abs(c2 - o2)
+                    lower_shadow_2 = min(o2, c2) - l2
+                    upper_shadow_2 = h2 - max(o2, c2)
                     
-                    if is_long:
+                    is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+                    is_red_hammer_yesterday = is_hammer_yesterday and r2
+                    
+                    # 3 נרות ירוקים רצופים או 2 נרות ירוקים שהאחרון גבוה מקודמו
+                    is_long_trend = (g1 and g2 and g3) or (g1 and g2 and c1 > c2)
+                    # 3 נרות אדומים רצופים או 2 נרות אדומים שהאחרון נמוך מקודמו
+                    is_short_trend = (r1 and r2 and r3) or (r1 and r2 and c1 < c2)
+                    
+                    # תנאי פטיש חדשים
+                    is_hammer_long = is_hammer_yesterday and g1
+                    is_red_hammer_short = is_red_hammer_yesterday and r1
+                    
+                    if is_long_trend or is_hammer_long:
                         pa_status = "לונג"
-                    elif is_short:
+                    elif is_short_trend or is_red_hammer_short:
                         pa_status = "שורט"
                     else:
                         pa_status = "מעורב"
@@ -1146,7 +1159,7 @@ with tab_market_dir:
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
-                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 ימי המסחר האחרונים</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה נרות (כולל תבניות פטיש)</div>
                     </div>
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים נעים</div>
