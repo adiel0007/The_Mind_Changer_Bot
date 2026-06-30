@@ -142,56 +142,67 @@ def get_session():
     s = requests.Session()
     s.headers.update({
         'User-Agent': random.choice(agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1'
+        'Upgrade-Insecure-Requests': '1'
     })
     return s
 
-# --- פונקציית מעקף (Bypass) עוצמתית למשיכת אופציות ישירות מה-API של יאהו ---
+# --- מנגנון חכם ומתקדם לשאיבת אופציות העוקף את חסימות yfinance ---
 def fetch_options_sentiment(ticker_symbol):
-    calls_oi = 0
-    puts_oi = 0
+    calls_oi, puts_oi = 0, 0
     
-    # ניסיון 1: משיכה ישירה מ-API של יאהו (מהיר ואמין יותר ולא נחסם בקלות)
+    # ניסיון 1: מעקף מורחב ליאהו - גישה ישירה ל-API הנסתר שלהם (חסין כמעט לחלוטין)
     try:
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': '*/*'
+        })
+        # ביקור בדף הראשי של המניה כדי למשוך Cookies + Crumb לתוך ה-Session
+        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=5)
+        
+        # קריאה ל-API של האופציות עם ה-Cookies החדשים
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json"
-        }
-        res = requests.get(url, headers=headers, timeout=5)
+        res = session.get(url, timeout=5)
+        
         if res.status_code == 200:
             data = res.json()
-            # מחלץ את שרשרת האופציות הקרובה ביותר
             opts = data.get('optionChain', {}).get('result', [])[0].get('options', [])[0]
             
-            calls_oi = sum([c.get('openInterest', 0) for c in opts.get('calls', [])])
-            puts_oi = sum([p.get('openInterest', 0) for p in opts.get('puts', [])])
-            
+            for c in opts.get('calls', []):
+                oi = c.get('openInterest')
+                if oi is not None: calls_oi += oi
+            for p in opts.get('puts', []):
+                oi = p.get('openInterest')
+                if oi is not None: puts_oi += oi
+                
             if calls_oi > 0 or puts_oi > 0:
                 return calls_oi, puts_oi
     except:
         pass
-        
-    # ניסיון 2: רשת ביטחון דרך yfinance הסטנדרטי במידה והראשון כשל
+
+    # ניסיון 2: רשת ביטחון דרך yfinance הרגיל במקרה שהראשון נכשל
     try:
         t = yf.Ticker(ticker_symbol)
-        opt_dates = t.options
-        if opt_dates:
-            chain = t.option_chain(opt_dates[0])
-            if 'openInterest' in chain.calls.columns:
-                calls_oi = chain.calls['openInterest'].fillna(0).sum()
-            if 'openInterest' in chain.puts.columns:
-                puts_oi = chain.puts['openInterest'].fillna(0).sum()
+        dates = t.options
+        if dates:
+            # סורקים עד 3 פקיעות למקרה שבראשונה אין פעילות (נפוץ בנכסים קטנים)
+            for date in dates[:3]:
+                try:
+                    chain = t.option_chain(date)
+                    if 'openInterest' in chain.calls.columns:
+                        calls_oi += chain.calls['openInterest'].fillna(0).sum()
+                    if 'openInterest' in chain.puts.columns:
+                        puts_oi += chain.puts['openInterest'].fillna(0).sum()
+                except:
+                    continue
+            if calls_oi > 0 or puts_oi > 0:
+                return calls_oi, puts_oi
     except:
         pass
-        
+
     return calls_oi, puts_oi
 
 def calculate_rsi(prices, period=14):
