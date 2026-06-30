@@ -6,6 +6,7 @@ import random
 import requests
 import os
 import contextlib
+import time
 
 # משיכת המפתח מתוך הסודות של Streamlit או הגדרה מקומית
 try:
@@ -134,11 +135,22 @@ div[data-testid="stTextInput"] input {{
 
 def get_session():
     agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
     ]
     s = requests.Session()
-    s.headers.update({'User-Agent': random.choice(agents)})
+    s.headers.update({
+        'User-Agent': random.choice(agents),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1'
+    })
     return s
 
 def calculate_rsi(prices, period=14):
@@ -251,7 +263,6 @@ def do_scan(mode):
             if df.empty or len(df) < 30:
                 continue
             
-            # וידוא שכל העמודות הנדרשות לפטיש/נרות קיימות
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
             if len(df) < 3:
                 continue
@@ -270,19 +281,14 @@ def do_scan(mode):
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
-            # --- משתני נרות להיום ולאתמול ---
             open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
             open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
             
-            # חישובי גוף וזנבות עבור הנר של אתמול
             body_2 = abs(close_2 - open_2)
             lower_shadow_2 = min(open_2, close_2) - low_2
             upper_shadow_2 = high_2 - max(open_2, close_2)
             
-            # לוגיקה מתמטית: פטיש (Hammer) אתמול
             is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
-            
-            # לוגיקה מתמטית: כוכב נופל (Shooting Star) אתמול
             is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
             
             if mode == "long":
@@ -290,7 +296,7 @@ def do_scan(mode):
                         and not (last > ma100 and last > ma200 and last > ma9)
                         and close_1 > open_1
                         and last > prev and chg > 0
-                        and is_hammer_yesterday): # דרישה לנר פטיש אתמול
+                        and is_hammer_yesterday): 
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
             else:
                 close_3 = float(close.iloc[-3])
@@ -298,7 +304,7 @@ def do_scan(mode):
 
                 if (rsi > 30 and two_consecutive_down and vol > 1_000_000
                         and close_1 < open_1
-                        and is_shooting_star_yesterday): # דרישה לכוכב נופל אתמול
+                        and is_shooting_star_yesterday):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -454,7 +460,7 @@ def analyze_ticker(ticker):
                 "outperform": "תשואת יתר"
             }
             translated_rec = hebrew_rec.get(rec_key, rec_key.replace('_', ' ').title())
-            analyst_text = f"מבוסס על {num_analysts} אנליסטים" if num_analysts else "קונצנזוס"
+            analyst_text = f"מבוסס על {num_analysts} মোহ" if num_analysts else "קונצנזוס"
             rec_text = f"המלצה: {translated_rec} ({analyst_text})"
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy", "outperform"]
@@ -1061,14 +1067,26 @@ with tab_market_dir:
             try:
                 session = get_session()
                 qqq = yf.Ticker("QQQ", session=session)
-                df = qqq.history(period="2y", interval="1d", auto_adjust=True)
                 
-                # תמיכה ב- MultiIndex אם yfinance מחזיר אותו
+                # ניסיון משיכה רגיל
+                try:
+                    df = qqq.history(period="2y", interval="1d", auto_adjust=True)
+                except:
+                    df = pd.DataFrame()
+                
+                # אם המשיכה נחסמה - ננסה שיטת משיכה אלטרנטיבית שמתעלמת מחסימות חלקיות
+                if df.empty:
+                    try:
+                        df = yf.download("QQQ", period="2y", interval="1d", progress=False)
+                    except:
+                        pass
+                
+                # סידור הנתונים
                 if not df.empty and isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                     
                 if df.empty or "Close" not in df.columns:
-                    st.error("לא התקבלו נתונים מספיקים מהבורסה עבור מדד ה-QQQ. נסה שוב בעוד מספר שניות.")
+                    st.error("הבורסה חסמה זמנית את הבקשות (Rate Limit). המתן כמה דקות ונסה שוב.")
                     st.stop()
                     
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
@@ -1078,14 +1096,15 @@ with tab_market_dir:
                 try:
                     opts = qqq.options
                     if opts:
-                        for date in opts[:3]:
+                        # שינוי משמעותי: משיכת תאריך פקיעה אחד בלבד כדי למנוע קריסה מ-Rate Limit
+                        for date in opts[:1]:
                             chain = qqq.option_chain(date)
                             if 'openInterest' in chain.calls.columns:
                                 calls_oi += chain.calls['openInterest'].sum()
                             if 'openInterest' in chain.puts.columns:
                                 puts_oi += chain.puts['openInterest'].sum()
                 except Exception:
-                    pass # ממשיך הלאה גם אם חסר נתון אופציות בבורסה
+                    pass # ממשיך הלאה גם אם האופציות נחסמו נקודתית
                 
                 total_oi = calls_oi + puts_oi
                 if total_oi > 0:
@@ -1119,13 +1138,17 @@ with tab_market_dir:
                     lower_shadow_2 = min(o2, c2) - l2
                     upper_shadow_2 = h2 - max(o2, c2)
                     
+                    # זיהוי פטיש סטנדרטי אתמול (זנב תחתון ארוך)
                     is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+                    # זיהוי כוכב נופל / פטיש הפוך אתמול (זנב עליון ארוך)
                     is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
                     
+                    # פטיש אדום (יכול להיות פטיש רגיל אדום או כוכב נופל אדום שמרמז על שורט חזק)
                     is_red_hammer_or_star = r2 and (is_hammer_yesterday or is_shooting_star_yesterday)
                     
-                    # תנאי לונג/שורט
+                    # תנאי לונג: 3 ירוקים, או 2 ירוקים עולים, או (נר ירוק היום + פטיש מכל סוג אתמול)
                     is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2) or (g1 and is_hammer_yesterday)
+                    # תנאי שורט: 3 אדומים, או 2 אדומים יורדים, או (נר אדום היום + פטיש/כוכב נופל אדום אתמול)
                     is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2) or (r1 and is_red_hammer_or_star)
                     
                     if is_long:
@@ -1135,7 +1158,7 @@ with tab_market_dir:
                     else:
                         pa_status = "מעורב"
                         
-                    # ממוצעים נעים
+                    # 4. הוספת תנאי ממוצעים נעים
                     ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
                     ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
                     ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
