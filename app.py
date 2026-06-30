@@ -153,6 +153,47 @@ def get_session():
     })
     return s
 
+# --- פונקציית מעקף (Bypass) עוצמתית למשיכת אופציות ישירות מה-API של יאהו ---
+def fetch_options_sentiment(ticker_symbol):
+    calls_oi = 0
+    puts_oi = 0
+    
+    # ניסיון 1: משיכה ישירה מ-API של יאהו (מהיר ואמין יותר ולא נחסם בקלות)
+    try:
+        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            # מחלץ את שרשרת האופציות הקרובה ביותר
+            opts = data.get('optionChain', {}).get('result', [])[0].get('options', [])[0]
+            
+            calls_oi = sum([c.get('openInterest', 0) for c in opts.get('calls', [])])
+            puts_oi = sum([p.get('openInterest', 0) for p in opts.get('puts', [])])
+            
+            if calls_oi > 0 or puts_oi > 0:
+                return calls_oi, puts_oi
+    except:
+        pass
+        
+    # ניסיון 2: רשת ביטחון דרך yfinance הסטנדרטי במידה והראשון כשל
+    try:
+        t = yf.Ticker(ticker_symbol)
+        opt_dates = t.options
+        if opt_dates:
+            chain = t.option_chain(opt_dates[0])
+            if 'openInterest' in chain.calls.columns:
+                calls_oi = chain.calls['openInterest'].fillna(0).sum()
+            if 'openInterest' in chain.puts.columns:
+                puts_oi = chain.puts['openInterest'].fillna(0).sum()
+    except:
+        pass
+        
+    return calls_oi, puts_oi
+
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -393,26 +434,16 @@ def analyze_ticker(ticker):
                     earnings_badge = "ירידה עתידית"
                     earnings_pos = False
 
-        # --- אופציות אמת מהבורסה (חיבור נקי לאופציות בלבד) ---
+        # --- משיכת אופציות ישירות עם הפונקציה החכמה שעוקפת חסימות ---
         options_text = "אין נתוני אופציות"
-        try:
-            t_opt = yf.Ticker(ticker) # יצירת אובייקט נקי ללא Session כדי לשמור עוגיות של יאהו
-            opts = t_opt.options
-            if opt_dates := list(opts):
-                nearest = opt_dates[0]
-                chain = t_opt.option_chain(nearest)
-                if 'openInterest' in chain.calls.columns and 'openInterest' in chain.puts.columns:
-                    calls_oi = chain.calls['openInterest'].fillna(0).sum()
-                    puts_oi = chain.puts['openInterest'].fillna(0).sum()
-                    total_oi = calls_oi + puts_oi
-                    if total_oi > 0:
-                        calls_ratio = (calls_oi / total_oi) * 100
-                        if calls_ratio >= 50:
-                            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
-                        else:
-                            options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
-        except Exception:
-            pass
+        calls_oi, puts_oi = fetch_options_sentiment(ticker)
+        total_oi = calls_oi + puts_oi
+        if total_oi > 0:
+            calls_ratio = (calls_oi / total_oi) * 100
+            if calls_ratio >= 50:
+                options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
+            else:
+                options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
 
         rev_growth = info.get("revenueGrowth")
         if rev_growth is not None:
@@ -668,8 +699,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   </div>
 </section>
 <div class="quote-strip">
-  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות"</div>
-  <div class="quote-src">— Warren Buffett</div>
+  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות" <span style="font-size: 0.8em; color: rgba(10,10,8,0.7); font-style: normal; font-weight: 600;">— וורן באפט</span></div>
 </div>
 <script>
 const QUOTES  = {quotes_json};
@@ -984,16 +1014,21 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
+<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
+<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
+<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
+<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
+<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
@@ -1046,45 +1081,29 @@ with tab_market_dir:
                 session = get_session()
                 qqq = yf.Ticker("QQQ", session=session)
                 
-                # ניסיון משיכה רגיל
+                # משיכת נתוני הגרף בנפרד (מוגן חסימות)
                 try:
                     df = qqq.history(period="2y", interval="1d", auto_adjust=True)
                 except:
                     df = pd.DataFrame()
                 
-                # אם המשיכה נחסמה - ננסה שיטת משיכה אלטרנטיבית שמתעלמת מחסימות חלקיות
                 if df.empty:
                     try:
                         df = yf.download("QQQ", period="2y", interval="1d", progress=False)
                     except:
                         pass
                 
-                # סידור הנתונים
                 if not df.empty and isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                     
                 if df.empty or "Close" not in df.columns:
-                    st.error("הבורסה חסמה זמנית את הבקשות (Rate Limit). המתן כמה דקות ונסה שוב.")
+                    st.error("הבורסה חסמה זמנית את הבקשות לגרפים (Rate Limit). המתן כמה דקות ונסה שוב.")
                     st.stop()
                     
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 
-                # 1. בדיקת סנטימנט אופציות
-                calls_oi, puts_oi = 0, 0
-                try:
-                    # שימוש באובייקט נקי ללא Session מותאם כדי לשמור על קוקיז של יאהו לאופציות
-                    qqq_opt = yf.Ticker("QQQ")
-                    opts = qqq_opt.options
-                    if opts:
-                        # משיכת תאריך פקיעה קרוב אחד כדי להימנע מחסימת Rate Limit
-                        for date in opts[:1]:
-                            chain = qqq_opt.option_chain(date)
-                            if 'openInterest' in chain.calls.columns:
-                                calls_oi += chain.calls['openInterest'].fillna(0).sum()
-                            if 'openInterest' in chain.puts.columns:
-                                puts_oi += chain.puts['openInterest'].fillna(0).sum()
-                except Exception:
-                    pass # ממשיך הלאה גם אם האופציות נחסמו נקודתית
+                # 1. משיכת אופציות דרך המעקף שיצרנו
+                calls_oi, puts_oi = fetch_options_sentiment("QQQ")
                 
                 total_oi = calls_oi + puts_oi
                 if total_oi > 0:
@@ -1118,17 +1137,12 @@ with tab_market_dir:
                     lower_shadow_2 = min(o2, c2) - l2
                     upper_shadow_2 = h2 - max(o2, c2)
                     
-                    # זיהוי פטיש סטנדרטי אתמול (זנב תחתון ארוך)
                     is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
-                    # זיהוי כוכב נופל / פטיש הפוך אתמול (זנב עליון ארוך)
                     is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
                     
-                    # פטיש אדום (יכול להיות פטיש רגיל אדום או כוכב נופל אדום שמרמז על שורט חזק)
                     is_red_hammer_or_star = r2 and (is_hammer_yesterday or is_shooting_star_yesterday)
                     
-                    # תנאי לונג: 3 ירוקים, או 2 ירוקים עולים, או (נר ירוק היום + פטיש מכל סוג אתמול)
                     is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2) or (g1 and is_hammer_yesterday)
-                    # תנאי שורט: 3 אדומים, או 2 אדומים יורדים, או (נר אדום היום + פטיש/כוכב נופל אדום אתמול)
                     is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2) or (r1 and is_red_hammer_or_star)
                     
                     if is_long:
@@ -1138,7 +1152,7 @@ with tab_market_dir:
                     else:
                         pa_status = "מעורב"
                         
-                    # 4. הוספת תנאי ממוצעים נעים
+                    # 4. ממוצעים נעים
                     ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
                     ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
                     ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
@@ -1214,7 +1228,7 @@ with tab_market_dir:
                     """, unsafe_allow_html=True)
                     
             except Exception as e:
-                st.error(f"אירעה שגיאה בניתוח המדד. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע.")
+                st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
