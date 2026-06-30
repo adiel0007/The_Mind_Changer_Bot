@@ -433,8 +433,6 @@ def do_scan(mode):
             recent_hammer_relaxed = is_hammer_today_relaxed or is_hammer_yesterday_relaxed or is_hammer_day_3_relaxed
             recent_hammer_strict = is_hammer_today_strict or is_hammer_yesterday_strict or is_hammer_day_3_strict
             
-            is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
-            
             if mode == "long":
                 yesterday_green = (close_2 > open_2)
                 not_at_ath_long = last < (ath * 0.92)
@@ -449,17 +447,10 @@ def do_scan(mode):
                         and not_at_ath_long): 
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True, "strict_hammer": recent_hammer_strict})
             else:
-                three_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
-                
-                yesterday_red_star = is_shooting_star_yesterday and (close_2 < open_2)
-                today_red_lower = (close_1 < open_1) and (close_1 < close_2)
-                star_condition = yesterday_red_star and today_red_lower
-                
-                short_pattern = three_consecutive_down or star_condition
-                
+                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3_val)
                 not_at_ath_short = last < (ath * 0.95)
 
-                if (rsi > 30 and vol > 300_000 and short_pattern and not_at_ath_short):
+                if (rsi > 30 and vol > 300_000 and two_consecutive_negative_closes and not_at_ath_short):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -1167,8 +1158,8 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: רחוקה לפחות מ-5% משיא כל הזמנים</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: 3 ימים יורדים ברצף או כוכב נופל אדום ולאחריו נר אדום נמוך יותר</li>
-    <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: שני ימי מסחר רצופים של סגירות שליליות (נמוכות מקודמתן)</li>
+    <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): מוודא נפח עולה ויותר Puts מ-Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -1213,20 +1204,25 @@ with tab_short:
             if stop_deep_s:
                 st.stop()
             if run_deep_s:
-                with st.spinner("מבצע סינון עומק מחזורי..."):
+                with st.spinner("מבצע סינון עומק מחזורי ובודק יחס אופציות (Puts > Calls)..."):
                     deep_filtered_short = []
                     session = get_session()
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
-                            ticker_obj = yf.Ticker(ticker_sym, session=session)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
-                            hist = hist.dropna(subset=["Volume"])
-                            if len(hist) >= 20:
-                                avg_vol_3d = hist["Volume"].iloc[-3:].mean()
-                                avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
-                                if avg_vol_3d > avg_vol_20d:
-                                    deep_filtered_short.append(item)
+                            
+                            # סינון חדש: בודק יחס אופציות (פוטים גדול מקולים)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
+                            
+                            if puts_oi > calls_oi:
+                                ticker_obj = yf.Ticker(ticker_sym, session=session)
+                                hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                                hist = hist.dropna(subset=["Volume"])
+                                if len(hist) >= 20:
+                                    avg_vol_3d = hist["Volume"].iloc[-3:].mean()
+                                    avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
+                                    if avg_vol_3d > avg_vol_20d:
+                                        deep_filtered_short.append(item)
                         except:
                             pass
                     st.session_state.short_results = deep_filtered_short
