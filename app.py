@@ -152,16 +152,13 @@ def get_session():
 # ============================================================
 # === פונקציה מתוקנת לשליפת סנטימנט אופציות (התיקון שלך) ===
 # ============================================================
-@st.cache_data(ttl=900, show_spinner=False)  # קאשינג ל-15 דקות כדי לא להציף את יאהו ולהיחסם
-def fetch_options_sentiment(ticker_symbol):
+def _fetch_options_sentiment_raw(ticker_symbol):
     """
-    שואב את יחס ה-Open Interest בין Calls ל-Puts עבור מניה נתונה.
-    הסיבה שזה נכשל בעבר: הבקשה ל-API הנסתר של יאהו דרשה "crumb token" תקף,
-    שלא היה מצורף לבקשה - מה שגרם לחסימה אוטומטית כמעט בכל פעם.
-    הפונקציה הזו מתקנת זאת ע"י קבלת cookies + crumb תקין לפני הבקשה,
-    סורקת כמה תאריכי פקיעה, ומוסיפה כמה שכבות גיבוי.
+    הליבה בפועל - ללא קאש. מבחינה בין 'כישלון תקשורת' (יש לזרוק שגיאה ולנסות שוב בעתיד)
+    לבין 'הצלחנו לקבל תשובה אך אין נתוני אופציות זמינים' (תוצאה לגיטימית, אפשר לשמור בקאש).
     """
     calls_oi, puts_oi = 0, 0
+    got_valid_response = False
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -169,99 +166,101 @@ def fetch_options_sentiment(ticker_symbol):
         'Accept-Language': 'en-US,en;q=0.9',
     }
 
-    # ───── שלב 1: ניסיון מלא ועם crumb token תקין (התיקון המרכזי) ─────
-    try:
-        session = requests.Session()
-        session.headers.update(headers)
-
-        # ביקור בדף הראשי כדי לקבל cookies תקפים
-        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=8)
-
-        # קבלת crumb token - בלעדיו יאהו חוסם את בקשת ה-API כמעט תמיד
-        crumb = ""
+    # ───── שלב 1: ניסיון מלא עם crumb token תקין, עד 3 סיבובים ─────
+    for attempt in range(3):
         try:
-            crumb_res = session.get(
-                'https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=8
-            )
-            if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
-                crumb = crumb_res.text.strip()
+            session = requests.Session()
+            session.headers.update(headers)
+            session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=10)
+
+            crumb = ""
+            try:
+                crumb_res = session.get(
+                    'https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10
+                )
+                if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
+                    crumb = crumb_res.text.strip()
+            except Exception:
+                pass
+
+            url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
+            params = {"crumb": crumb} if crumb else {}
+            res = session.get(url, params=params, timeout=10)
+
+            if res.status_code == 200:
+                data = res.json()
+                result = data.get('optionChain', {}).get('result', [])
+                if result:
+                    got_valid_response = True  # קיבלנו תשובה תקינה מהשרת - לא כישלון תקשורת
+                    all_dates = result[0].get('expirationDates', [])
+                    dates_to_scan = all_dates[:4] if all_dates else [None]
+
+                    for exp_date in dates_to_scan:
+                        try:
+                            if exp_date:
+                                scan_url = f"{url}?date={exp_date}"
+                                if crumb:
+                                    scan_url += f"&crumb={crumb}"
+                                scan_res = session.get(scan_url, timeout=10)
+                                scan_data = scan_res.json()
+                                opts_list = scan_data.get('optionChain', {}).get('result', [])
+                            else:
+                                opts_list = result
+
+                            if not opts_list:
+                                continue
+                            opts = opts_list[0].get('options', [])
+                            if not opts:
+                                continue
+                            opts = opts[0]
+
+                            for c in opts.get('calls', []):
+                                oi = c.get('openInterest')
+                                if oi is not None:
+                                    calls_oi += oi
+                            for p in opts.get('puts', []):
+                                oi = p.get('openInterest')
+                                if oi is not None:
+                                    puts_oi += oi
+                        except Exception:
+                            continue
+
+                    if calls_oi > 0 or puts_oi > 0:
+                        return calls_oi, puts_oi
         except Exception:
             pass
+        time.sleep(1.5 * (attempt + 1))
 
-        # קריאה ל-API של האופציות, עם crumb אם הצלחנו לקבל אותו
-        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
-        params = {"crumb": crumb} if crumb else {}
-        res = session.get(url, params=params, timeout=8)
-
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get('optionChain', {}).get('result', [])
-            if result:
-                # אוספים את כל תאריכי הפקיעה הזמינים ולא רק את הראשון
-                all_dates = result[0].get('expirationDates', [])
-                dates_to_scan = all_dates[:4] if all_dates else [None]
-
-                for exp_date in dates_to_scan:
+    # ───── שלב 2: רשת ביטחון - yfinance עם session ייעודי ─────
+    for attempt in range(2):
+        try:
+            s2 = requests.Session()
+            s2.headers.update(headers)
+            t = yf.Ticker(ticker_symbol, session=s2)
+            dates = t.options
+            if dates:
+                got_valid_response = True
+                for date in dates[:4]:
                     try:
-                        if exp_date:
-                            scan_url = f"{url}?date={exp_date}"
-                            if crumb:
-                                scan_url += f"&crumb={crumb}"
-                            scan_res = session.get(scan_url, timeout=8)
-                            scan_data = scan_res.json()
-                            opts_list = scan_data.get('optionChain', {}).get('result', [])
-                        else:
-                            opts_list = result
-
-                        if not opts_list:
-                            continue
-                        opts = opts_list[0].get('options', [])
-                        if not opts:
-                            continue
-                        opts = opts[0]
-
-                        for c in opts.get('calls', []):
-                            oi = c.get('openInterest')
-                            if oi is not None:
-                                calls_oi += oi
-                        for p in opts.get('puts', []):
-                            oi = p.get('openInterest')
-                            if oi is not None:
-                                puts_oi += oi
+                        chain = t.option_chain(date)
+                        if 'openInterest' in chain.calls.columns:
+                            calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                        if 'openInterest' in chain.puts.columns:
+                            puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
                     except Exception:
                         continue
-
                 if calls_oi > 0 or puts_oi > 0:
                     return calls_oi, puts_oi
-    except Exception:
-        pass
+        except Exception:
+            pass
+        time.sleep(1.5 * (attempt + 1))
 
-    # ───── שלב 2: רשת ביטחון - yfinance הרגיל עם session ייעודי ─────
-    try:
-        s2 = requests.Session()
-        s2.headers.update(headers)
-        t = yf.Ticker(ticker_symbol, session=s2)
-        dates = t.options
-        if dates:
-            for date in dates[:4]:
-                try:
-                    chain = t.option_chain(date)
-                    if 'openInterest' in chain.calls.columns:
-                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                    if 'openInterest' in chain.puts.columns:
-                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
-                except Exception:
-                    continue
-            if calls_oi > 0 or puts_oi > 0:
-                return calls_oi, puts_oi
-    except Exception:
-        pass
-
-    # ───── שלב 3: ניסיון אחרון - yfinance ללא session מותאם (ברירת מחדל) ─────
+    # ───── שלב 3: ניסיון אחרון - yfinance ללא session מותאם ─────
     try:
         t2 = yf.Ticker(ticker_symbol)
         dates2 = t2.options
         if dates2:
+            got_valid_response = True
             for date in dates2[:2]:
                 try:
                     chain2 = t2.option_chain(date)
@@ -274,7 +273,29 @@ def fetch_options_sentiment(ticker_symbol):
     except Exception:
         pass
 
-    return calls_oi, puts_oi
+    if got_valid_response:
+        # קיבלנו תשובה אמיתית מהשרת אבל פשוט אין נתוני אופציות (מניה ללא אופציות פעילות) - תוצאה לגיטימית
+        return calls_oi, puts_oi
+
+    # אף ניסיון לא קיבל תשובה תקינה בכלל - כישלון תקשורת אמיתי, לא לשמור בקאש
+    raise RuntimeError(f"לא ניתן היה לקבל תשובה מיאהו עבור אופציות {ticker_symbol}")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_options_sentiment_cached(ticker_symbol):
+    # נקראת רק אם הליבה הצליחה (לא זרקה שגיאה) - כך כישלון תקשורת זמני לעולם לא "נתקע" בקאש
+    return _fetch_options_sentiment_raw(ticker_symbol)
+
+
+def fetch_options_sentiment(ticker_symbol):
+    """נקודת הכניסה הציבורית: מנסה גרסה מקושרת בקאש, ואם נכשלת - מנסה שוב ישירות בלי קאש."""
+    try:
+        return _fetch_options_sentiment_cached(ticker_symbol)
+    except Exception:
+        try:
+            return _fetch_options_sentiment_raw(ticker_symbol)
+        except Exception:
+            return 0, 0
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -509,85 +530,196 @@ def _get_yahoo_crumb_session():
     return session, crumb
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_fundamentals(ticker_symbol):
+# ════════════════════════════════════════════════════════════════
+# מטמון crumb משותף ברמת התהליך (לא ברמת המשתמש הבודד) - זה הלב של
+# התיקון: כל המניות וכל סוגי הבקשות (אופציות, נתוני יסוד) משתמשים
+# באותו crumb/session, במקום שכל בקשה תיצור crumb חדש משלה. זה מקטין
+# את כמות הפניות התכופות ל-Yahoo שגרמו לחסימות לסירוגין (rate limit).
+# ════════════════════════════════════════════════════════════════
+_CRUMB_CACHE = {"session": None, "crumb": None, "ts": 0.0}
+_CRUMB_TTL_SECONDS = 25 * 60  # רענון כל 25 דקות לכל היותר
+
+
+def get_shared_yahoo_session(force_refresh=False):
+    """מחזירה session+crumb תקפים. משתמשת בעותק שמור אם קיים ותקף,
+    ומרעננת רק כשבאמת צריך (פג תוקף, או נכשל ונדרש crumb חדש)."""
+    now = time.time()
+    cached_ok = (
+        not force_refresh
+        and _CRUMB_CACHE["session"] is not None
+        and _CRUMB_CACHE["crumb"]
+        and (now - _CRUMB_CACHE["ts"]) < _CRUMB_TTL_SECONDS
+    )
+    if cached_ok:
+        return _CRUMB_CACHE["session"], _CRUMB_CACHE["crumb"]
+
+    session, crumb = _get_yahoo_crumb_session()
+    if crumb:
+        _CRUMB_CACHE["session"] = session
+        _CRUMB_CACHE["crumb"] = crumb
+        _CRUMB_CACHE["ts"] = now
+        return session, crumb
+
+    # אם הריענון נכשל אך יש לנו עדיין עותק ישן בתוקף חלקי - עדיף להשתמש בו
+    # מאשר לעבוד בלי crumb בכלל
+    if _CRUMB_CACHE["crumb"]:
+        return _CRUMB_CACHE["session"], _CRUMB_CACHE["crumb"]
+
+    return session, crumb  # גם אם crumb ריק, מחזירים את ה-session לשימוש בגיבויים
+
+
+def _fetch_fundamentals_raw(ticker_symbol):
     """
-    מושך נתוני יסוד (דוחות, תחזיות, המלצות אנליסטים) ישירות מ-quoteSummary של יאהו,
-    עם crumb token תקין ועד 3 ניסיונות חוזרים - במקום t.info השביר שנכשל בלי אזהרה.
+    מושך נתוני יסוד: yfinance הוא המקור הראשון (הוא מטפל ב-crumb פנימית מגרסה 0.2.18),
+    ורק אם נכשל לגמרי - נופלים ל-API הישיר עם session משותף.
+    זורקת שגיאה רק אם ממש אין כלום, כדי שהעטיפה לא תשמור כישלון בקאש.
     """
-    modules = "financialData,defaultKeyStatistics,earningsTrend,recommendationTrend,summaryDetail,earningsHistory"
     merged = {}
 
+    def _raw(d, key):
+        v = d.get(key)
+        if isinstance(v, dict):
+            return v.get("raw")
+        return v
+
+    def _parse_beat_list(quarters):
+        beat = []
+        for q in quarters:
+            actual = _raw(q, "epsActual")
+            estimate = _raw(q, "epsEstimate")
+            if actual is not None and estimate is not None:
+                beat.append(actual >= estimate)
+        return beat[-4:]
+
+    def _has_data(d):
+        return any(v is not None for v in d.values() if not isinstance(v, list)) or bool(d.get("earnings_beat_list"))
+
+    # ══════════════════════════════════════════════════════════
+    # מקור 1: yfinance ישיר - המקור האמין ביותר (מטפל ב-auth פנימית)
+    # ══════════════════════════════════════════════════════════
     for attempt in range(3):
         try:
-            session, crumb = _get_yahoo_crumb_session()
-            url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
-            params = {"modules": modules}
-            if crumb:
-                params["crumb"] = crumb
-            res = session.get(url, params=params, timeout=8)
-            if res.status_code == 200:
-                data = res.json()
-                results = data.get("quoteSummary", {}).get("result", [])
-                if results:
-                    r = results[0]
-                    fin = r.get("financialData", {}) or {}
-                    stats = r.get("defaultKeyStatistics", {}) or {}
-                    summ = r.get("summaryDetail", {}) or {}
-                    earn_hist = r.get("earningsHistory", {}) or {}
+            t = yf.Ticker(ticker_symbol)
 
-                    def _raw(d, key):
-                        v = d.get(key)
-                        if isinstance(v, dict):
-                            return v.get("raw")
-                        return v
-
-                    merged["revenueGrowth"] = _raw(fin, "revenueGrowth")
-                    merged["recommendationKey"] = fin.get("recommendationKey")
-                    merged["numberOfAnalystOpinions"] = _raw(fin, "numberOfAnalystOpinions")
-                    merged["earningsQuarterlyGrowth"] = _raw(stats, "earningsQuarterlyGrowth")
-                    merged["trailingEps"] = _raw(stats, "trailingEps")
-                    merged["forwardEps"] = _raw(stats, "forwardEps")
-
-                    # ── היסטוריית עמידה בתחזיות (Earnings Beat/Miss) - עד 4 רבעונים אחרונים ──
-                    quarters = earn_hist.get("history", []) or []
-                    beat_list = []
-                    for q in quarters:
-                        actual = _raw(q, "epsActual")
-                        estimate = _raw(q, "epsEstimate")
-                        if actual is not None and estimate is not None:
-                            beat_list.append(actual >= estimate)
-                    merged["earnings_beat_list"] = beat_list[-4:]  # 4 הרבעונים האחרונים בלבד
-
-                    if any(v is not None for v in merged.values() if not isinstance(v, list)) or beat_list:
-                        return merged
-        except Exception:
-            pass
-        time.sleep(1.2 * (attempt + 1))
-
-    # ───── גיבוי: ניסיון דרך yfinance הרגיל אם הבקשה הידנית נכשלה ─────
-    try:
-        t_fallback = yf.Ticker(ticker_symbol, session=get_session())
-        info = t_fallback.info or {}
-        if info:
-            for key in ["revenueGrowth", "recommendationKey", "numberOfAnalystOpinions",
-                        "earningsQuarterlyGrowth", "trailingEps", "forwardEps"]:
-                if merged.get(key) is None:
-                    merged[key] = info.get(key)
-        if not merged.get("earnings_beat_list"):
+            # נתוני יסוד מ-.info
             try:
-                eh = t_fallback.earnings_history
-                if eh is not None and not eh.empty and "epsActual" in eh.columns and "epsEstimate" in eh.columns:
-                    sub = eh.dropna(subset=["epsActual", "epsEstimate"]).tail(4)
-                    merged["earnings_beat_list"] = [
-                        bool(a >= e) for a, e in zip(sub["epsActual"], sub["epsEstimate"])
-                    ]
+                info = t.info or {}
+                if info and len(info) > 5:  # info תקין מכיל עשרות שדות
+                    merged["revenueGrowth"]           = info.get("revenueGrowth")
+                    merged["recommendationKey"]        = info.get("recommendationKey")
+                    merged["numberOfAnalystOpinions"]  = info.get("numberOfAnalystOpinions")
+                    merged["earningsQuarterlyGrowth"]  = info.get("earningsQuarterlyGrowth")
+                    merged["trailingEps"]              = info.get("trailingEps")
+                    merged["forwardEps"]               = info.get("forwardEps")
             except Exception:
                 pass
-    except Exception:
-        pass
 
-    return merged
+            # היסטוריית beat/miss מ-earnings_history (מניה עמדה/עברה תחזית)
+            if not merged.get("earnings_beat_list"):
+                for attr in ["earnings_history", "quarterly_earnings"]:
+                    try:
+                        eh = getattr(t, attr, None)
+                        if eh is not None and not getattr(eh, "empty", True):
+                            cols = list(eh.columns) if hasattr(eh, "columns") else []
+                            if "epsActual" in cols and "epsEstimate" in cols:
+                                sub = eh.dropna(subset=["epsActual", "epsEstimate"]).tail(4)
+                                if not sub.empty:
+                                    merged["earnings_beat_list"] = [
+                                        bool(a >= e) for a, e in
+                                        zip(sub["epsActual"], sub["epsEstimate"])
+                                    ]
+                                    break
+                    except Exception:
+                        continue
+
+            if _has_data(merged):
+                return merged
+        except Exception:
+            pass
+        if attempt < 2:
+            time.sleep(1.5 * (attempt + 1))
+
+    # ══════════════════════════════════════════════════════════
+    # מקור 2: Yahoo quoteSummary API ישיר - עם session משותף (crumb אחד לכולם)
+    # ══════════════════════════════════════════════════════════
+    modules = "financialData,defaultKeyStatistics,earningsHistory"
+    for attempt in range(3):
+        try:
+            # שימוש ב-session משותף - לא יוצרים session חדש בכל ניסיון
+            # כדי לא לגרור rate-limit מרובה ניסיונות
+            force = (attempt > 0)  # ניסיון שני ואילך מאלץ רענון crumb
+            session, crumb = get_shared_yahoo_session(force_refresh=force)
+
+            for base in ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]:
+                try:
+                    url = f"{base}/v10/finance/quoteSummary/{ticker_symbol}"
+                    params = {"modules": modules}
+                    if crumb:
+                        params["crumb"] = crumb
+                    res = session.get(url, params=params, timeout=10)
+                    if res.status_code != 200:
+                        continue
+                    data = res.json()
+                    results = data.get("quoteSummary", {}).get("result", [])
+                    if not results:
+                        continue
+                    r = results[0]
+                    fin       = r.get("financialData", {}) or {}
+                    stats     = r.get("defaultKeyStatistics", {}) or {}
+                    earn_hist = r.get("earningsHistory", {}) or {}
+
+                    if merged.get("revenueGrowth") is None:
+                        merged["revenueGrowth"] = _raw(fin, "revenueGrowth")
+                    if merged.get("recommendationKey") is None:
+                        merged["recommendationKey"] = fin.get("recommendationKey")
+                    if merged.get("numberOfAnalystOpinions") is None:
+                        merged["numberOfAnalystOpinions"] = _raw(fin, "numberOfAnalystOpinions")
+                    if merged.get("earningsQuarterlyGrowth") is None:
+                        merged["earningsQuarterlyGrowth"] = _raw(stats, "earningsQuarterlyGrowth")
+                    if merged.get("trailingEps") is None:
+                        merged["trailingEps"] = _raw(stats, "trailingEps")
+                    if merged.get("forwardEps") is None:
+                        merged["forwardEps"] = _raw(stats, "forwardEps")
+                    if not merged.get("earnings_beat_list"):
+                        quarters = earn_hist.get("history", []) or []
+                        bl = _parse_beat_list(quarters)
+                        if bl:
+                            merged["earnings_beat_list"] = bl
+
+                    if _has_data(merged):
+                        return merged
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+
+    if _has_data(merged):
+        return merged
+
+    raise RuntimeError(f"לא ניתן היה למשוך נתוני יסוד עבור {ticker_symbol} אחרי כל הניסיונות")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_fundamentals_cached(ticker_symbol):
+    # עטיפה דקה זו נקראת רק אם _fetch_fundamentals_raw הצליחה (לא זרקה שגיאה),
+    # ולכן רק תוצאות אמיתיות נשמרות בקאש - כישלון זמני לעולם לא "נתקע" כתוצאה שגויה.
+    return _fetch_fundamentals_raw(ticker_symbol)
+
+
+def fetch_fundamentals(ticker_symbol):
+    """
+    נקודת הכניסה הציבורית: מנסה את הגרסה המקושרת בקאש; אם גם זו נכשלת (קרה לאחרונה,
+    או שהקאש עצמו "תקוע"), מנסה שוב ישירות בלי קאש לפני שמוותרת.
+    """
+    try:
+        return _fetch_fundamentals_cached(ticker_symbol)
+    except Exception:
+        try:
+            return _fetch_fundamentals_raw(ticker_symbol)
+        except Exception:
+            return {}
 
 
 def analyze_ticker(ticker):
