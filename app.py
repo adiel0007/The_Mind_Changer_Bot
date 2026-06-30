@@ -149,24 +149,15 @@ def get_session():
     })
     return s
 
-# ============================================================
-# === פונקציה מתוקנת לשליפת סנטימנט אופציות (התיקון שלך) ===
-# ============================================================
 def _fetch_options_sentiment_raw(ticker_symbol):
-    """
-    הליבה בפועל - ללא קאש. מבחינה בין 'כישלון תקשורת' (יש לזרוק שגיאה ולנסות שוב בעתיד)
-    לבין 'הצלחנו לקבל תשובה אך אין נתוני אופציות זמינים' (תוצאה לגיטימית, אפשר לשמור בקאש).
-    """
     calls_oi, puts_oi = 0, 0
     got_valid_response = False
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
     }
 
-    # ───── שלב 1: ניסיון מלא עם crumb token תקין, עד 3 סיבובים ─────
     for attempt in range(3):
         try:
             session = requests.Session()
@@ -175,9 +166,7 @@ def _fetch_options_sentiment_raw(ticker_symbol):
 
             crumb = ""
             try:
-                crumb_res = session.get(
-                    'https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10
-                )
+                crumb_res = session.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
                 if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
                     crumb = crumb_res.text.strip()
             except Exception:
@@ -191,7 +180,7 @@ def _fetch_options_sentiment_raw(ticker_symbol):
                 data = res.json()
                 result = data.get('optionChain', {}).get('result', [])
                 if result:
-                    got_valid_response = True  # קיבלנו תשובה תקינה מהשרת - לא כישלון תקשורת
+                    got_valid_response = True 
                     all_dates = result[0].get('expirationDates', [])
                     dates_to_scan = all_dates[:4] if all_dates else [None]
 
@@ -231,7 +220,6 @@ def _fetch_options_sentiment_raw(ticker_symbol):
             pass
         time.sleep(1.5 * (attempt + 1))
 
-    # ───── שלב 2: רשת ביטחון - yfinance עם session ייעודי ─────
     for attempt in range(2):
         try:
             s2 = requests.Session()
@@ -255,7 +243,6 @@ def _fetch_options_sentiment_raw(ticker_symbol):
             pass
         time.sleep(1.5 * (attempt + 1))
 
-    # ───── שלב 3: ניסיון אחרון - yfinance ללא session מותאם ─────
     try:
         t2 = yf.Ticker(ticker_symbol)
         dates2 = t2.options
@@ -274,21 +261,16 @@ def _fetch_options_sentiment_raw(ticker_symbol):
         pass
 
     if got_valid_response:
-        # קיבלנו תשובה אמיתית מהשרת אבל פשוט אין נתוני אופציות (מניה ללא אופציות פעילות) - תוצאה לגיטימית
         return calls_oi, puts_oi
 
-    # אף ניסיון לא קיבל תשובה תקינה בכלל - כישלון תקשורת אמיתי, לא לשמור בקאש
     raise RuntimeError(f"לא ניתן היה לקבל תשובה מיאהו עבור אופציות {ticker_symbol}")
 
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _fetch_options_sentiment_cached(ticker_symbol):
-    # נקראת רק אם הליבה הצליחה (לא זרקה שגיאה) - כך כישלון תקשורת זמני לעולם לא "נתקע" בקאש
     return _fetch_options_sentiment_raw(ticker_symbol)
 
-
 def fetch_options_sentiment(ticker_symbol):
-    """נקודת הכניסה הציבורית: מנסה גרסה מקושרת בקאש, ואם נכשלת - מנסה שוב ישירות בלי קאש."""
     try:
         return _fetch_options_sentiment_cached(ticker_symbol)
     except Exception:
@@ -402,10 +384,12 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                df = t.history(period="2y", interval="1d", auto_adjust=True, actions=False)
+                df = t.history(period="max", interval="1d", auto_adjust=True, actions=False)
             
             if df.empty or len(df) < 30:
                 continue
+                
+            ath = float(df["High"].max())
             
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
             if len(df) < 3:
@@ -424,45 +408,46 @@ def do_scan(mode):
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
-            # שליפת הנתונים ל-3 הימים האחרונים לבדיקת תבניות והמשכיות
             open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
             open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
             open_3, close_3_val, high_3, low_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3]), float(df["High"].iloc[-3]), float(df["Low"].iloc[-3])
             
-            # בדיקת פטיש היום
             body_1 = abs(close_1 - open_1)
             lower_shadow_1 = min(open_1, close_1) - low_1
             upper_shadow_1 = high_1 - max(open_1, close_1)
-            is_hammer_today = (body_1 > 0) and (lower_shadow_1 >= 2 * body_1) and (upper_shadow_1 <= body_1)
+            is_hammer_today_relaxed = (body_1 >= 0) and (lower_shadow_1 >= 1.5 * body_1) and (upper_shadow_1 <= 1.5 * body_1)
+            is_hammer_today_strict = (body_1 > 0) and (lower_shadow_1 >= 2 * body_1) and (upper_shadow_1 <= body_1)
             
-            # בדיקת פטיש אתמול
             body_2 = abs(close_2 - open_2)
             lower_shadow_2 = min(open_2, close_2) - low_2
             upper_shadow_2 = high_2 - max(open_2, close_2)
-            is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+            is_hammer_yesterday_relaxed = (body_2 >= 0) and (lower_shadow_2 >= 1.5 * body_2) and (upper_shadow_2 <= 1.5 * body_2)
+            is_hammer_yesterday_strict = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
             
-            # בדיקת פטיש שלשום
             body_3 = abs(close_3_val - open_3)
             lower_shadow_3 = min(open_3, close_3_val) - low_3
             upper_shadow_3 = high_3 - max(open_3, close_3_val)
-            is_hammer_day_3 = (body_3 > 0) and (lower_shadow_3 >= 2 * body_3) and (upper_shadow_3 <= body_3)
+            is_hammer_day_3_relaxed = (body_3 >= 0) and (lower_shadow_3 >= 1.5 * body_3) and (upper_shadow_3 <= 1.5 * body_3)
+            is_hammer_day_3_strict = (body_3 > 0) and (lower_shadow_3 >= 2 * body_3) and (upper_shadow_3 <= body_3)
             
-            # האם היה נר פטיש באחד מ-3 הימים האחרונים?
-            recent_hammer = is_hammer_today or is_hammer_yesterday or is_hammer_day_3
+            recent_hammer_relaxed = is_hammer_today_relaxed or is_hammer_yesterday_relaxed or is_hammer_day_3_relaxed
+            recent_hammer_strict = is_hammer_today_strict or is_hammer_yesterday_strict or is_hammer_day_3_strict
             
-            # כוכב נופל אתמול (עבור רדאר השורט)
             is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
             
             if mode == "long":
                 yesterday_green = (close_2 > open_2)
-                if (last > ma9 and rsi < 70 and vol > 1_000_000
+                not_at_ath = last < (ath * 0.92)
+
+                if (last > ma9 and rsi < 70 and vol > 300_000
                         and not (last > ma100 and last > ma200 and last > ma9)
                         and not (last < ma100 and last < ma200 and last < ma9)
                         and close_1 > open_1
                         and last > prev
                         and yesterday_green
-                        and recent_hammer): 
-                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
+                        and recent_hammer_relaxed
+                        and not_at_ath): 
+                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True, "strict_hammer": recent_hammer_strict})
             else:
                 two_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
 
@@ -477,20 +462,15 @@ def do_scan(mode):
     return results
 
 def normalize_ticker(raw_ticker):
-    """מנקה ומתקנן סימול שהוקלד ע"י המשתמש כך שיתאים לפורמט שיאהו מצפה לו.
-    לדוגמה: רווחים מיותרים, ונקודה בסימולי מניות-משנה (BRK.B -> BRK-B)."""
     t = raw_ticker.strip().upper()
-    if t.startswith("^"):  # מדדים כמו ^GSPC נשארים כמו שהם
+    if t.startswith("^"):
         return t
     t = t.replace(" ", "")
     if "." in t:
         t = t.replace(".", "-")
     return t
 
-
 def _fetch_history_with_retry(ticker, attempts=3):
-    """מנסה למשוך נתוני היסטוריה עם מספר ניסיונות חוזרים ושיטות שונות,
-    כדי שכשלון זמני (rate limit/timeout) לא יגרום ל'סימול שגוי' מזויף."""
     last_error = None
     for i in range(attempts):
         try:
@@ -502,7 +482,6 @@ def _fetch_history_with_retry(ticker, attempts=3):
         except Exception as e:
             last_error = e
 
-        # ניסיון גיבוי דרך yf.download באותו סיבוב
         try:
             df2 = yf.download(ticker, period="1y", interval="1d", progress=False, threads=False)
             if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
@@ -516,17 +495,13 @@ def _fetch_history_with_retry(ticker, attempts=3):
         except Exception as e:
             last_error = e
 
-        time.sleep(1.5 * (i + 1))  # backoff הולך וגדל בין ניסיונות
+        time.sleep(1.5 * (i + 1))
 
     return pd.DataFrame(), None, last_error
 
-
 def _get_yahoo_crumb_session():
-    """יוצרת session עם cookies + crumb token תקין מול יאהו.
-    זהו הבסיס המשותף לכל בקשות ה-API הנסתרות (אופציות, נתוני יסוד וכו')."""
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
     }
@@ -549,20 +524,10 @@ def _get_yahoo_crumb_session():
         pass
     return session, crumb
 
-
-# ════════════════════════════════════════════════════════════════
-# מטמון crumb משותף ברמת התהליך (לא ברמת המשתמש הבודד) - זה הלב של
-# התיקון: כל המניות וכל סוגי הבקשות (אופציות, נתוני יסוד) משתמשים
-# באותו crumb/session, במקום שכל בקשה תיצור crumb חדש משלה. זה מקטין
-# את כמות הפניות התכופות ל-Yahoo שגרמו לחסימות לסירוגין (rate limit).
-# ════════════════════════════════════════════════════════════════
 _CRUMB_CACHE = {"session": None, "crumb": None, "ts": 0.0}
-_CRUMB_TTL_SECONDS = 25 * 60  # רענון כל 25 דקות לכל היותר
-
+_CRUMB_TTL_SECONDS = 25 * 60
 
 def get_shared_yahoo_session(force_refresh=False):
-    """מחזירה session+crumb תקפים. משתמשת בעותק שמור אם קיים ותקף,
-    ומרעננת רק כשבאמת צריך (פג תוקף, או נכשל ונדרש crumb חדש)."""
     now = time.time()
     cached_ok = (
         not force_refresh
@@ -580,20 +545,12 @@ def get_shared_yahoo_session(force_refresh=False):
         _CRUMB_CACHE["ts"] = now
         return session, crumb
 
-    # אם הריענון נכשל אך יש לנו עדיין עותק ישן בתוקף חלקי - עדיף להשתמש בו
-    # מאשר לעבוד בלי crumb בכלל
     if _CRUMB_CACHE["crumb"]:
         return _CRUMB_CACHE["session"], _CRUMB_CACHE["crumb"]
 
-    return session, crumb  # גם אם crumb ריק, מחזירים את ה-session לשימוש בגיבויים
-
+    return session, crumb
 
 def _fetch_fundamentals_raw(ticker_symbol):
-    """
-    מושך נתוני יסוד: yfinance הוא המקור הראשון (הוא מטפל ב-crumb פנימית מגרסה 0.2.18),
-    ורק אם נכשל לגמרי - נופלים ל-API הישיר עם session משותף.
-    זורקת שגיאה רק אם ממש אין כלום, כדי שהעטיפה לא תשמור כישלון בקאש.
-    """
     merged = {}
 
     def _raw(d, key):
@@ -614,17 +571,12 @@ def _fetch_fundamentals_raw(ticker_symbol):
     def _has_data(d):
         return any(v is not None for v in d.values() if not isinstance(v, list)) or bool(d.get("earnings_beat_list"))
 
-    # ══════════════════════════════════════════════════════════
-    # מקור 1: yfinance ישיר - המקור האמין ביותר (מטפל ב-auth פנימית)
-    # ══════════════════════════════════════════════════════════
     for attempt in range(3):
         try:
             t = yf.Ticker(ticker_symbol)
-
-            # נתוני יסוד מ-.info
             try:
                 info = t.info or {}
-                if info and len(info) > 5:  # info תקין מכיל עשרות שדות
+                if info and len(info) > 5:
                     merged["revenueGrowth"]           = info.get("revenueGrowth")
                     merged["recommendationKey"]        = info.get("recommendationKey")
                     merged["numberOfAnalystOpinions"]  = info.get("numberOfAnalystOpinions")
@@ -634,7 +586,6 @@ def _fetch_fundamentals_raw(ticker_symbol):
             except Exception:
                 pass
 
-            # היסטוריית beat/miss מ-earnings_history (מניה עמדה/עברה תחזית)
             if not merged.get("earnings_beat_list"):
                 for attr in ["earnings_history", "quarterly_earnings"]:
                     try:
@@ -659,15 +610,10 @@ def _fetch_fundamentals_raw(ticker_symbol):
         if attempt < 2:
             time.sleep(1.5 * (attempt + 1))
 
-    # ══════════════════════════════════════════════════════════
-    # מקור 2: Yahoo quoteSummary API ישיר - עם session משותף (crumb אחד לכולם)
-    # ══════════════════════════════════════════════════════════
     modules = "financialData,defaultKeyStatistics,earningsHistory"
     for attempt in range(3):
         try:
-            # שימוש ב-session משותף - לא יוצרים session חדש בכל ניסיון
-            # כדי לא לגרור rate-limit מרובה ניסיונות
-            force = (attempt > 0)  # ניסיון שני ואילך מאלץ רענון crumb
+            force = (attempt > 0)
             session, crumb = get_shared_yahoo_session(force_refresh=force)
 
             for base in ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]:
@@ -723,16 +669,9 @@ def _fetch_fundamentals_raw(ticker_symbol):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _fetch_fundamentals_cached(ticker_symbol):
-    # עטיפה דקה זו נקראת רק אם _fetch_fundamentals_raw הצליחה (לא זרקה שגיאה),
-    # ולכן רק תוצאות אמיתיות נשמרות בקאש - כישלון זמני לעולם לא "נתקע" כתוצאה שגויה.
     return _fetch_fundamentals_raw(ticker_symbol)
 
-
 def fetch_fundamentals(ticker_symbol):
-    """
-    נקודת הכניסה הציבורית: מנסה את הגרסה המקושרת בקאש; אם גם זו נכשלת (קרה לאחרונה,
-    או שהקאש עצמו "תקוע"), מנסה שוב ישירות בלי קאש לפני שמוותרת.
-    """
     try:
         return _fetch_fundamentals_cached(ticker_symbol)
     except Exception:
@@ -741,17 +680,15 @@ def fetch_fundamentals(ticker_symbol):
         except Exception:
             return {}
 
-
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
         df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
 
         if df.empty or len(df) < 30:
-            # ניסיון אחרון - לבדוק אם הסימול בכלל קיים (כדי להבחין בין סימול שגוי לתקלת רשת)
             try:
                 test_info = yf.Ticker(clean_ticker).fast_info
-                _ = test_info.last_price  # אם זה עובד, הסימול תקין אבל הייתה תקלת רשת זמנית
+                _ = test_info.last_price
                 return {"_error": "network"}
             except Exception:
                 return {"_error": "invalid"}
@@ -759,8 +696,6 @@ def analyze_ticker(ticker):
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
 
-        # ── מחיר נוכחי אמיתי: נשלף בנפרד מ-fast_info ולא מה-history, ──
-        # ── כדי שלא יוצג מחיר מותאם/מושהה ולא יהיה פער מהמחיר האמיתי ──
         last = float(close.iloc[-1])
         prev = float(close.iloc[-2])
         try:
@@ -772,7 +707,7 @@ def analyze_ticker(ticker):
                     last = live_price
                     prev = live_prev_close
         except Exception:
-            pass  # אם fast_info נכשל, נישאר עם הערכים מה-history כגיבוי
+            pass
 
         chg = round(((last - prev) / prev) * 100, 2)
         rsi = calculate_rsi(close)
@@ -827,7 +762,6 @@ def analyze_ticker(ticker):
                 earnings_text = f"המניה עמדה בתחזית האנליסטים רק ב-{beats} מתוך {total_q} הרבעונים האחרונים"
                 earnings_pos = False
 
-        # --- משיכת אופציות ישירות עם הפונקציה החכמה שעוקפת חסימות ---
         options_text = "אין נתוני אופציות"
         calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
@@ -875,8 +809,8 @@ def analyze_ticker(ticker):
             rec_pos = None
 
         ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
-        trend_up = last > ma9_val  # משמש רק לטקסט המגמה (לונג/שורט), לא לתג עלה/ירד
-        up = chg >= 0  # התג "עלה/ירד" תמיד תואם בדיוק לאחוז השינוי המוצג
+        trend_up = last > ma9_val 
+        up = chg >= 0
         trend_status = "שורי (דומיננטיות קונים ברורה)" if trend_up else "דובי (לחץ מוכרים מוגבר)"
         
         formatted_opinion = (
@@ -908,7 +842,6 @@ def analyze_ticker(ticker):
             "summary_text": formatted_opinion
         }
     except Exception as e:
-        # כשל לא צפוי (לרוב חיבור/timeout) - לא נסמן כסימול שגוי כדי לא להטעות את המשתמש
         return {"_error": "network"}
 
 def render_cards(data, mode):
@@ -1131,7 +1064,6 @@ buildTape(); buildHero();
 
 st.components.v1.html(top_html, height=590, scrolling=False)
 
-# ── 2. רכיב הרדאר המרכזי ──
 st.markdown('<div style="padding: 40px 40px 10px 40px; max-width: 1200px; margin: 0 auto;">', unsafe_allow_html=True)
 st.markdown('<p style="color:#c9a84c; font-size:0.68rem; font-weight:600; letter-spacing:0.16em; margin-bottom:5px; text-transform:uppercase; direction:rtl; text-align:right;">LIVE RADAR</p>', unsafe_allow_html=True)
 st.markdown('<h2 style="font-family:\'Playfair Display\',serif; font-size:2rem; font-weight:900; color:#f0ede6; margin:0 0 5px 0; direction:rtl; text-align:right;">רדאר המניות</h2>', unsafe_allow_html=True)
@@ -1139,7 +1071,6 @@ st.markdown('<p style="color:#9a8f7a; font-size:0.88rem; margin-bottom:20px; dir
 
 tab_long, tab_short, tab_ai, tab_fear_greed, tab_market_dir = st.tabs(["רדאר לונג 📈", "רדאר שורט 📉", "ניתוח מניות Ai 🤖", "מדד הפחד והגרידיות 📊", "לאן השוק הולך 🧭"])
 
-# ── טאב לונג ──
 with tab_long:
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -1148,11 +1079,11 @@ with tab_long:
   <div class="panel-title">רדאר לונג</div>
   <div class="panel-sub">סריקת מניות במומנטום עולה</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
+    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית, רחוקה לפחות מ-8% מתחת לשיא כל הזמנים</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
-    <li><div class="crit-dot dot-green"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-green"></div>מבנה נרות: היום ואתמול ירוקים, היום סגר מעל אתמול, פטיש ב-3 ימים האחרונים</li>
-    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חיתוך ביניים (לא מעל/מתחת לכולם יחד)</li>
+    <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
+    <li><div class="crit-dot dot-green"></div>מבנה נרות: היום ואתמול ירוקים, סגירה גבוהה יותר ותבנית פטיש גמישה</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חיתוך ביניים (לא מתחת לכולם יחד, ולא מעל כולם)</li>
     <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
@@ -1198,10 +1129,12 @@ with tab_long:
             if stop_deep_l:
                 st.stop()
             if run_deep_l:
-                with st.spinner("מבצע סינון עומק מחזורי..."):
+                with st.spinner("מבצע סינון עומק מחזורי ומוודא תבנית פטיש קשיחה..."):
                     deep_filtered = []
                     session = get_session()
                     for item in st.session_state.long_results:
+                        if not item.get("strict_hammer", False):
+                            continue
                         try:
                             ticker_sym = item["symbol"]
                             ticker_obj = yf.Ticker(ticker_sym, session=session)
@@ -1217,7 +1150,6 @@ with tab_long:
                     st.session_state.long_results = deep_filtered
                     st.rerun()
 
-# ── טאב שורט ──
 with tab_short:
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -1295,7 +1227,6 @@ with tab_short:
                     st.session_state.short_results = deep_filtered_short
                     st.rerun()
 
-# ── טאב ניתוח AI ──
 with tab_ai:
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -1324,7 +1255,6 @@ with tab_ai:
                 with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
                     res = analyze_ticker(ticker_clean)
 
-                    # אם הייתה תקלת רשת זמנית (לא סימול שגוי) - ננסה שוב אוטומטית עד פעמיים נוספות
                     retry_count = 0
                     while isinstance(res, dict) and res.get("_error") == "network" and retry_count < 2:
                         time.sleep(2)
@@ -1410,7 +1340,6 @@ with tab_ai:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── 1. טאב מעודכן: שעון הפחד והגרידיות - עיצוב מחולק למקטעים בסגנון CNN ──
 with tab_fear_greed:
     fg_val, fg_rating = get_fear_greed_data()
     needle_angle = (fg_val / 100) * 180 - 90
@@ -1456,7 +1385,6 @@ with tab_fear_greed:
 </div>"""
         st.markdown(html_text, unsafe_allow_html=True)
 
-# ── כרטיסייה חדשה: לאן השוק הולך ──
 with tab_market_dir:
     st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
@@ -1483,7 +1411,6 @@ with tab_market_dir:
                 session = get_session()
                 qqq = yf.Ticker("QQQ", session=session)
                 
-                # משיכת נתוני הגרף בנפרד (מוגן חסימות)
                 try:
                     df = qqq.history(period="2y", interval="1d", auto_adjust=True)
                 except:
@@ -1504,7 +1431,6 @@ with tab_market_dir:
                     
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 
-                # 1. משיכת אופציות דרך המעקף שיצרנו
                 calls_oi, puts_oi = fetch_options_sentiment("QQQ")
                 
                 total_oi = calls_oi + puts_oi
@@ -1516,7 +1442,6 @@ with tab_market_dir:
                     call_pct, put_pct = 50.0, 50.0
                     opt_status = "לא זמין"
                 
-                # 2. חישוב מתנד RSI
                 rsi_val = calculate_rsi(df['Close'])
                 if rsi_val > 70:
                     rsi_status = "קניית יתר"
@@ -1525,7 +1450,6 @@ with tab_market_dir:
                 else:
                     rsi_status = "ניטרלי"
                     
-                # 3 + 4. ניתוח פעולת מחיר וממוצעים נעים
                 if len(df) >= 200:
                     c1, c2, c3 = float(df['Close'].iloc[-1]), float(df['Close'].iloc[-2]), float(df['Close'].iloc[-3])
                     o1, o2, o3 = float(df['Open'].iloc[-1]), float(df['Open'].iloc[-2]), float(df['Open'].iloc[-3])
@@ -1534,7 +1458,6 @@ with tab_market_dir:
                     g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
                     r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
                     
-                    # חישובי נרות לאתמול עבור זיהוי תבניות היפוך
                     body_2 = abs(c2 - o2)
                     lower_shadow_2 = min(o2, c2) - l2
                     upper_shadow_2 = h2 - max(o2, c2)
@@ -1554,7 +1477,6 @@ with tab_market_dir:
                     else:
                         pa_status = "מעורב"
                         
-                    # 4. ממוצעים נעים
                     ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
                     ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
                     ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
@@ -1569,7 +1491,6 @@ with tab_market_dir:
                     pa_status = "חסר נתונים"
                     ma_status = "חסר נתונים"
                     
-                # שיקלול ותוצאה סופית
                 if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג" and ma_status == "לונג":
                     verdict = "לונג"
                 elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט" and ma_status == "שורט":
@@ -1577,7 +1498,6 @@ with tab_market_dir:
                 else:
                     verdict = "מעורב"
                     
-                # הצגת המדדים על המסך
                 st.markdown(f"""
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; direction: rtl;">
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
@@ -1603,7 +1523,6 @@ with tab_market_dir:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # הצגת הבאנר הגרפי בהתאם לתוצאה
                 if verdict == "לונג":
                     st.markdown("""
                     <div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);">
@@ -1632,7 +1551,6 @@ with tab_market_dir:
             except Exception as e:
                 st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
 
-# ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head><meta charset="UTF-8"/><style>
