@@ -435,26 +435,85 @@ def do_scan(mode):
     status.empty()
     return results
 
+def normalize_ticker(raw_ticker):
+    """מנקה ומתקנן סימול שהוקלד ע"י המשתמש כך שיתאים לפורמט שיאהו מצפה לו.
+    לדוגמה: רווחים מיותרים, ונקודה בסימולי מניות-משנה (BRK.B -> BRK-B)."""
+    t = raw_ticker.strip().upper()
+    if t.startswith("^"):  # מדדים כמו ^GSPC נשארים כמו שהם
+        return t
+    t = t.replace(" ", "")
+    if "." in t:
+        t = t.replace(".", "-")
+    return t
+
+
+def _fetch_history_with_retry(ticker, attempts=3):
+    """מנסה למשוך נתוני היסטוריה עם מספר ניסיונות חוזרים ושיטות שונות,
+    כדי שכשלון זמני (rate limit/timeout) לא יגרום ל'סימול שגוי' מזויף."""
+    last_error = None
+    for i in range(attempts):
+        try:
+            session = get_session()
+            t = yf.Ticker(ticker, session=session)
+            df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
+            if not df.empty and len(df) >= 30:
+                return df, t, None
+        except Exception as e:
+            last_error = e
+
+        # ניסיון גיבוי דרך yf.download באותו סיבוב
+        try:
+            df2 = yf.download(ticker, period="1y", interval="1d", progress=False, threads=False)
+            if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
+                df2.columns = df2.columns.get_level_values(0)
+            if not df2.empty and len(df2) >= 30:
+                try:
+                    t_obj = yf.Ticker(ticker, session=get_session())
+                except Exception:
+                    t_obj = yf.Ticker(ticker)
+                return df2, t_obj, None
+        except Exception as e:
+            last_error = e
+
+        time.sleep(1.5 * (i + 1))  # backoff הולך וגדל בין ניסיונות
+
+    return pd.DataFrame(), None, last_error
+
+
 def analyze_ticker(ticker):
     try:
-        session = get_session()
-        t = yf.Ticker(ticker, session=session)
-        df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
-        
-        if df.empty or len(df) < 30:
-            df = yf.download(ticker, period="1y", interval="1d", progress=False)
-            if not df.empty and isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+        clean_ticker = normalize_ticker(ticker)
+        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
 
         if df.empty or len(df) < 30:
-            return None
-            
+            # ניסיון אחרון - לבדוק אם הסימול בכלל קיים (כדי להבחין בין סימול שגוי לתקלת רשת)
+            try:
+                test_info = yf.Ticker(clean_ticker).fast_info
+                _ = test_info.last_price  # אם זה עובד, הסימול תקין אבל הייתה תקלת רשת זמנית
+                return {"_error": "network"}
+            except Exception:
+                return {"_error": "invalid"}
+
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
-        last  = float(close.iloc[-1])
-        prev  = float(close.iloc[-2])
-        chg   = round(((last - prev) / prev) * 100, 2)
-        rsi   = calculate_rsi(close)
+
+        # ── מחיר נוכחי אמיתי: נשלף בנפרד מ-fast_info ולא מה-history, ──
+        # ── כדי שלא יוצג מחיר מותאם/מושהה ולא יהיה פער מהמחיר האמיתי ──
+        last = float(close.iloc[-1])
+        prev = float(close.iloc[-2])
+        try:
+            fi = t.fast_info if t is not None else None
+            if fi is not None:
+                live_price = float(fi.last_price)
+                live_prev_close = float(fi.previous_close)
+                if live_price > 0 and live_prev_close > 0:
+                    last = live_price
+                    prev = live_prev_close
+        except Exception:
+            pass  # אם fast_info נכשל, נישאר עם הערכים מה-history כגיבוי
+
+        chg = round(((last - prev) / prev) * 100, 2)
+        rsi = calculate_rsi(close)
         
         if rsi > 70:
             rsi_status, rsi_pos = "זמן למכור", False
@@ -518,7 +577,7 @@ def analyze_ticker(ticker):
 
         # --- משיכת אופציות ישירות עם הפונקציה החכמה שעוקפת חסימות ---
         options_text = "אין נתוני אופציות"
-        calls_oi, puts_oi = fetch_options_sentiment(ticker)
+        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
         if total_oi > 0:
             calls_ratio = (calls_oi / total_oi) * 100
@@ -568,13 +627,13 @@ def analyze_ticker(ticker):
         trend_status = "שורי (דומיננטיות קונים ברורה)" if up else "דובי (לחץ מוכרים מוגבר)"
         
         formatted_opinion = (
-            f"🎯 <b>מסקנה אנליטית:</b> מניית {ticker} נמצאת כעת במבנה מחירים <b>{trend_status}</b> בטווח הקצר המיידי.<br/>"
+            f"🎯 <b>מסקנה אנליטית:</b> מניית {clean_ticker} נמצאת כעת במבנה מחירים <b>{trend_status}</b> בטווח הקצר המיידי.<br/>"
             f"📊 <b style='color:#c9a84c;'>מצב המתנדים:</b> מדד ה-RSI עומד על {rsi:.1f} המייצג סביבה תנודתית, כאשר נפח המסחר משקף מעורבות מוסדית.<br/>"
             f"🌐 <b style='color:#c9a84c;'>טווח ארוך (מאקרו):</b> נכס הבסיס נסחר במגמה של <b>{ma_status}</b> ביחס לממוצעים 100 ו-200 ימים."
         )
         
         return {
-            "ticker":   ticker,
+            "ticker":   clean_ticker,
             "price":    f"${last:.2f}",
             "chg":      f"+{chg}%" if chg >= 0 else f"{chg}%",
             "up":       up,
@@ -596,7 +655,8 @@ def analyze_ticker(ticker):
             "summary_text": formatted_opinion
         }
     except Exception as e:
-        return None
+        # כשל לא צפוי (לרוב חיבור/timeout) - לא נסמן כסימול שגוי כדי לא להטעות את המשתמש
+        return {"_error": "network"}
 
 def render_cards(data, mode):
     if data is None:
@@ -1009,11 +1069,22 @@ with tab_ai:
                 ticker_clean = ticker_val.upper().strip()
                 with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
                     res = analyze_ticker(ticker_clean)
-                    if res:
+
+                    # אם הייתה תקלת רשת זמנית (לא סימול שגוי) - ננסה שוב אוטומטית עד פעמיים נוספות
+                    retry_count = 0
+                    while isinstance(res, dict) and res.get("_error") == "network" and retry_count < 2:
+                        time.sleep(2)
+                        res = analyze_ticker(ticker_clean)
+                        retry_count += 1
+
+                    if res and not (isinstance(res, dict) and "_error" in res):
                         st.session_state.analysis = res
                     else:
                         st.session_state.analysis = None
-                        st.error("לא ניתן היה למשוך נתונים עבור סימול זה. ייתכן שאין לו מספיק היסטוריה קיימת או שהסימול שגוי.")
+                        if isinstance(res, dict) and res.get("_error") == "invalid":
+                            st.error(f"הסימול '{ticker_clean}' לא נמצא. ודא שכתבת אותו נכון (לדוגמה: AAPL, TSLA, BRK-B).")
+                        else:
+                            st.error("יאהו פיננס עמוס כרגע ולא הצליח להחזיר נתונים אחרי כמה ניסיונות. המתן רגע ולחץ שוב על 'נתח מניה'.")
                         
         if st.session_state.analysis:
             analysis_html = render_analysis(st.session_state.analysis)
