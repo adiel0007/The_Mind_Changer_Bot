@@ -104,8 +104,8 @@ div.stButton > button {{
     padding: 11px !important;
     border-radius: 0 0 4px 4px !important;
     font-size: 0.78rem !important;
-    font-weight: 900 !important; /* הדגשה מקסימלית */
-    color: #000000 !important;   /* שחור חזק לכל הכפתורים הפעילים */
+    font-weight: 900 !important;
+    color: #000000 !important;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     cursor: pointer !important;
@@ -279,10 +279,10 @@ def do_scan(mode):
             lower_shadow_2 = min(open_2, close_2) - low_2
             upper_shadow_2 = high_2 - max(open_2, close_2)
             
-            # לוגיקה מתמטית: פטיש (Hammer) אתמול - זנב תחתון ארוך פי 2 מהגוף, זנב עליון קצר
+            # לוגיקה מתמטית: פטיש (Hammer) אתמול
             is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
             
-            # לוגיקה מתמטית: כוכב נופל (Shooting Star) אתמול - זנב עליון ארוך פי 2 מהגוף, זנב תחתון קצר
+            # לוגיקה מתמטית: כוכב נופל (Shooting Star) אתמול
             is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
             
             if mode == "long":
@@ -308,7 +308,8 @@ def do_scan(mode):
 
 def analyze_ticker(ticker):
     try:
-        t = yf.Ticker(ticker)
+        session = get_session()
+        t = yf.Ticker(ticker, session=session)
         df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
         
         if df.empty or len(df) < 30:
@@ -411,15 +412,16 @@ def analyze_ticker(ticker):
             if opt_dates := list(opts):
                 nearest = opt_dates[0]
                 chain = t.option_chain(nearest)
-                calls_oi = chain.calls['openInterest'].sum()
-                puts_oi = chain.puts['openInterest'].sum()
-                total_oi = calls_oi + puts_oi
-                if total_oi > 0:
-                    calls_ratio = (calls_oi / total_oi) * 100
-                    if calls_ratio >= 50:
-                        options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
-                    else:
-                        options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
+                if 'openInterest' in chain.calls.columns and 'openInterest' in chain.puts.columns:
+                    calls_oi = chain.calls['openInterest'].sum()
+                    puts_oi = chain.puts['openInterest'].sum()
+                    total_oi = calls_oi + puts_oi
+                    if total_oi > 0:
+                        calls_ratio = (calls_oi / total_oi) * 100
+                        if calls_ratio >= 50:
+                            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
+                        else:
+                            options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
         except Exception:
             pass
 
@@ -812,7 +814,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (ללא מכירת יתר)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: פטיש אדום אתמול וסגירה אדומה היום</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: כוכב נופל אתמול וסגירה אדומה היום</li>
     <li><div class="crit-dot dot-red"></div>איזון נגזרים: נטיית Puts</li>
     <li><div class="crit-dot dot-red"></div>בקרת סיכון: הגנה מנפילת יתר רצופה</li>
   </ul>
@@ -1057,26 +1059,42 @@ with tab_market_dir:
     if run_qqq:
         with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
             try:
-                qqq = yf.Ticker("QQQ")
-                # שינינו ל-2y כדי שיהיה מספיק מידע לממוצע נע 200
-                df = qqq.history(period="2y", interval="1d")
+                session = get_session()
+                qqq = yf.Ticker("QQQ", session=session)
+                df = qqq.history(period="2y", interval="1d", auto_adjust=True)
+                
+                # תמיכה ב- MultiIndex אם yfinance מחזיר אותו
+                if not df.empty and isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                    
+                if df.empty or "Close" not in df.columns:
+                    st.error("לא התקבלו נתונים מספיקים מהבורסה עבור מדד ה-QQQ. נסה שוב בעוד מספר שניות.")
+                    st.stop()
+                    
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
-                opts = qqq.options
                 
                 # 1. בדיקת סנטימנט אופציות
                 calls_oi, puts_oi = 0, 0
-                if opts:
-                    # בדיקת 3 תאריכי הפקיעה הקרובים ביותר לאמינות מקסימלית
-                    for date in opts[:3]:
-                        chain = qqq.option_chain(date)
-                        calls_oi += chain.calls['openInterest'].sum()
-                        puts_oi += chain.puts['openInterest'].sum()
+                try:
+                    opts = qqq.options
+                    if opts:
+                        for date in opts[:3]:
+                            chain = qqq.option_chain(date)
+                            if 'openInterest' in chain.calls.columns:
+                                calls_oi += chain.calls['openInterest'].sum()
+                            if 'openInterest' in chain.puts.columns:
+                                puts_oi += chain.puts['openInterest'].sum()
+                except Exception:
+                    pass # ממשיך הלאה גם אם חסר נתון אופציות בבורסה
                 
                 total_oi = calls_oi + puts_oi
-                call_pct = (calls_oi / total_oi * 100) if total_oi > 0 else 50
-                put_pct = (puts_oi / total_oi * 100) if total_oi > 0 else 50
-                
-                opt_status = "קולים" if call_pct > put_pct else "פוטים"
+                if total_oi > 0:
+                    call_pct = (calls_oi / total_oi * 100)
+                    put_pct = (puts_oi / total_oi * 100)
+                    opt_status = "קולים" if call_pct > put_pct else "פוטים"
+                else:
+                    call_pct, put_pct = 50.0, 50.0
+                    opt_status = "לא זמין"
                 
                 # 2. חישוב מתנד RSI
                 rsi_val = calculate_rsi(df['Close'])
@@ -1089,41 +1107,38 @@ with tab_market_dir:
                     
                 # 3 + 4. ניתוח פעולת מחיר וממוצעים נעים
                 if len(df) >= 200:
-                    c1, c2, c3 = df['Close'].iloc[-1], df['Close'].iloc[-2], df['Close'].iloc[-3]
-                    o1, o2, o3 = df['Open'].iloc[-1], df['Open'].iloc[-2], df['Open'].iloc[-3]
-                    h2, l2 = df['High'].iloc[-2], df['Low'].iloc[-2]
+                    c1, c2, c3 = float(df['Close'].iloc[-1]), float(df['Close'].iloc[-2]), float(df['Close'].iloc[-3])
+                    o1, o2, o3 = float(df['Open'].iloc[-1]), float(df['Open'].iloc[-2]), float(df['Open'].iloc[-3])
+                    h2, l2 = float(df['High'].iloc[-2]), float(df['Low'].iloc[-2])
                     
                     g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
                     r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
                     
-                    # חישוב פטיש לאתמול
+                    # חישובי נרות לאתמול עבור זיהוי תבניות היפוך
                     body_2 = abs(c2 - o2)
                     lower_shadow_2 = min(o2, c2) - l2
                     upper_shadow_2 = h2 - max(o2, c2)
                     
                     is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
-                    is_red_hammer_yesterday = is_hammer_yesterday and r2
+                    is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
                     
-                    # 3 נרות ירוקים רצופים או 2 נרות ירוקים שהאחרון גבוה מקודמו
-                    is_long_trend = (g1 and g2 and g3) or (g1 and g2 and c1 > c2)
-                    # 3 נרות אדומים רצופים או 2 נרות אדומים שהאחרון נמוך מקודמו
-                    is_short_trend = (r1 and r2 and r3) or (r1 and r2 and c1 < c2)
+                    is_red_hammer_or_star = r2 and (is_hammer_yesterday or is_shooting_star_yesterday)
                     
-                    # תנאי פטיש חדשים
-                    is_hammer_long = is_hammer_yesterday and g1
-                    is_red_hammer_short = is_red_hammer_yesterday and r1
+                    # תנאי לונג/שורט
+                    is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2) or (g1 and is_hammer_yesterday)
+                    is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2) or (r1 and is_red_hammer_or_star)
                     
-                    if is_long_trend or is_hammer_long:
+                    if is_long:
                         pa_status = "לונג"
-                    elif is_short_trend or is_red_hammer_short:
+                    elif is_short:
                         pa_status = "שורט"
                     else:
                         pa_status = "מעורב"
                         
-                    # 4. הוספת תנאי ממוצעים נעים
-                    ma9 = df['Close'].rolling(9).mean().iloc[-1]
-                    ma100 = df['Close'].rolling(100).mean().iloc[-1]
-                    ma200 = df['Close'].rolling(200).mean().iloc[-1]
+                    # ממוצעים נעים
+                    ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
+                    ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
+                    ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
                     
                     if r1 and r2 and (c1 < ma100 or c1 < ma200):
                         ma_status = "שורט"
@@ -1135,7 +1150,7 @@ with tab_market_dir:
                     pa_status = "חסר נתונים"
                     ma_status = "חסר נתונים"
                     
-                # שיקלול ותוצאה סופית מעודכנת (חייב להתקיים גם תנאי הממוצעים)
+                # שיקלול ותוצאה סופית
                 if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג" and ma_status == "לונג":
                     verdict = "לונג"
                 elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט" and ma_status == "שורט":
@@ -1159,7 +1174,7 @@ with tab_market_dir:
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
-                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה נרות (כולל תבניות פטיש)</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 הימים האחרונים (כולל זיהוי פטישים)</div>
                     </div>
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים נעים</div>
@@ -1196,7 +1211,7 @@ with tab_market_dir:
                     """, unsafe_allow_html=True)
                     
             except Exception as e:
-                st.error("אירעה שגיאה בניתוח המדד. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע.")
+                st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
