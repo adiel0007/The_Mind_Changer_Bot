@@ -418,33 +418,53 @@ def do_scan(mode):
             
             ma9_series = close.rolling(9).mean()
             ma9   = float(ma9_series.iloc[-1])
-            ma9_prev = float(ma9_series.iloc[-2])
             
             ma100 = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
             ma200 = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
             vol   = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
             chg   = round(((last - prev) / prev) * 100, 2)
             
+            # שליפת הנתונים ל-3 הימים האחרונים לבדיקת תבניות והמשכיות
             open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
             open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
+            open_3, close_3_val, high_3, low_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3]), float(df["High"].iloc[-3]), float(df["Low"].iloc[-3])
             
+            # בדיקת פטיש היום
+            body_1 = abs(close_1 - open_1)
+            lower_shadow_1 = min(open_1, close_1) - low_1
+            upper_shadow_1 = high_1 - max(open_1, close_1)
+            is_hammer_today = (body_1 > 0) and (lower_shadow_1 >= 2 * body_1) and (upper_shadow_1 <= body_1)
+            
+            # בדיקת פטיש אתמול
             body_2 = abs(close_2 - open_2)
             lower_shadow_2 = min(open_2, close_2) - low_2
             upper_shadow_2 = high_2 - max(open_2, close_2)
-            
             is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
+            
+            # בדיקת פטיש שלשום
+            body_3 = abs(close_3_val - open_3)
+            lower_shadow_3 = min(open_3, close_3_val) - low_3
+            upper_shadow_3 = high_3 - max(open_3, close_3_val)
+            is_hammer_day_3 = (body_3 > 0) and (lower_shadow_3 >= 2 * body_3) and (upper_shadow_3 <= body_3)
+            
+            # האם היה נר פטיש באחד מ-3 הימים האחרונים?
+            recent_hammer = is_hammer_today or is_hammer_yesterday or is_hammer_day_3
+            
+            # כוכב נופל אתמול (עבור רדאר השורט)
             is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
             
             if mode == "long":
-                if (last > ma9 and prev > ma9_prev and rsi < 70 and vol > 1_000_000
+                yesterday_green = (close_2 > open_2)
+                if (last > ma9 and rsi < 70 and vol > 1_000_000
                         and not (last > ma100 and last > ma200 and last > ma9)
+                        and not (last < ma100 and last < ma200 and last < ma9)
                         and close_1 > open_1
-                        and last > prev and chg > 0
-                        and is_hammer_yesterday): 
-                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%", "up": True})
+                        and last > prev
+                        and yesterday_green
+                        and recent_hammer): 
+                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                close_3 = float(close.iloc[-3])
-                two_consecutive_down = (close_1 < close_2) and (close_2 < close_3)
+                two_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
 
                 if (rsi > 30 and two_consecutive_down and vol > 1_000_000
                         and close_1 < open_1
@@ -1131,7 +1151,8 @@ with tab_long:
     <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: נזילות גבוהה</li>
-    <li><div class="crit-dot dot-green"></div>מבנה נרות: פטיש אתמול וסגירה ירוקה היום</li>
+    <li><div class="crit-dot dot-green"></div>מבנה נרות: היום ואתמול ירוקים, היום סגר מעל אתמול, פטיש ב-3 ימים האחרונים</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חיתוך ביניים (לא מעל/מתחת לכולם יחד)</li>
     <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
   </ul>
 </div>""", unsafe_allow_html=True)
