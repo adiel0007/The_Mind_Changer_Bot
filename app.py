@@ -515,7 +515,7 @@ def fetch_fundamentals(ticker_symbol):
     מושך נתוני יסוד (דוחות, תחזיות, המלצות אנליסטים) ישירות מ-quoteSummary של יאהו,
     עם crumb token תקין ועד 3 ניסיונות חוזרים - במקום t.info השביר שנכשל בלי אזהרה.
     """
-    modules = "financialData,defaultKeyStatistics,earningsTrend,recommendationTrend,summaryDetail"
+    modules = "financialData,defaultKeyStatistics,earningsTrend,recommendationTrend,summaryDetail,earningsHistory"
     merged = {}
 
     for attempt in range(3):
@@ -534,6 +534,7 @@ def fetch_fundamentals(ticker_symbol):
                     fin = r.get("financialData", {}) or {}
                     stats = r.get("defaultKeyStatistics", {}) or {}
                     summ = r.get("summaryDetail", {}) or {}
+                    earn_hist = r.get("earningsHistory", {}) or {}
 
                     def _raw(d, key):
                         v = d.get(key)
@@ -548,7 +549,17 @@ def fetch_fundamentals(ticker_symbol):
                     merged["trailingEps"] = _raw(stats, "trailingEps")
                     merged["forwardEps"] = _raw(stats, "forwardEps")
 
-                    if any(v is not None for v in merged.values()):
+                    # ── היסטוריית עמידה בתחזיות (Earnings Beat/Miss) - עד 4 רבעונים אחרונים ──
+                    quarters = earn_hist.get("history", []) or []
+                    beat_list = []
+                    for q in quarters:
+                        actual = _raw(q, "epsActual")
+                        estimate = _raw(q, "epsEstimate")
+                        if actual is not None and estimate is not None:
+                            beat_list.append(actual >= estimate)
+                    merged["earnings_beat_list"] = beat_list[-4:]  # 4 הרבעונים האחרונים בלבד
+
+                    if any(v is not None for v in merged.values() if not isinstance(v, list)) or beat_list:
                         return merged
         except Exception:
             pass
@@ -563,6 +574,16 @@ def fetch_fundamentals(ticker_symbol):
                         "earningsQuarterlyGrowth", "trailingEps", "forwardEps"]:
                 if merged.get(key) is None:
                     merged[key] = info.get(key)
+        if not merged.get("earnings_beat_list"):
+            try:
+                eh = t_fallback.earnings_history
+                if eh is not None and not eh.empty and "epsActual" in eh.columns and "epsEstimate" in eh.columns:
+                    sub = eh.dropna(subset=["epsActual", "epsEstimate"]).tail(4)
+                    merged["earnings_beat_list"] = [
+                        bool(a >= e) for a, e in zip(sub["epsActual"], sub["epsEstimate"])
+                    ]
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -636,29 +657,23 @@ def analyze_ticker(ticker):
         earnings_badge = "לא זמין"
         earnings_pos = None
 
-        q_growth = info.get("earningsQuarterlyGrowth")
-        if q_growth is not None:
-            val = round(q_growth * 100, 1)
-            if val > 0:
-                earnings_text = f"צמיחה רבעונית ברווחים של {val}%"
-                earnings_badge = "צמיחה"
+        beat_list = info.get("earnings_beat_list") or []
+        if beat_list:
+            total_q = len(beat_list)
+            beats = sum(1 for b in beat_list if b)
+            earnings_badge = f"{beats}/{total_q}"
+            if beats == total_q:
+                earnings_text = f"המניה עמדה בתחזית האנליסטים או עברה אותה ב-{beats} מתוך {total_q} הרבעונים האחרונים — רצף מושלם"
+                earnings_pos = True
+            elif beats == 0:
+                earnings_text = f"המניה לא עמדה בתחזית האנליסטים באף אחד מ-{total_q} הרבעונים האחרונים"
+                earnings_pos = False
+            elif beats >= total_q / 2:
+                earnings_text = f"המניה עמדה בתחזית האנליסטים או עברה אותה ב-{beats} מתוך {total_q} הרבעונים האחרונים"
                 earnings_pos = True
             else:
-                earnings_text = f"נסיגה רבעונית ברווחים של {abs(val)}%"
-                earnings_badge = "נסיגה"
+                earnings_text = f"המניה עמדה בתחזית האנליסטים רק ב-{beats} מתוך {total_q} הרבעונים האחרונים"
                 earnings_pos = False
-        else:
-            eps_trail = info.get('trailingEps')
-            eps_forw = info.get('forwardEps')
-            if eps_trail is not None and eps_forw is not None:
-                if eps_forw >= eps_trail:
-                    earnings_text = f"תחזית צמיחה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "צמיחה עתידית"
-                    earnings_pos = True
-                else:
-                    earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
-                    earnings_badge = "ירידה עתידית"
-                    earnings_pos = False
 
         # --- משיכת אופציות ישירות עם הפונקציה החכמה שעוקפת חסימות ---
         options_text = "אין נתוני אופציות"
