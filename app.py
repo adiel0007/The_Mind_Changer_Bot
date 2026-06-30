@@ -340,7 +340,6 @@ def analyze_ticker(ticker):
         else:
             rsi_status, rsi_pos = "ניטרלי", None
 
-        # מילוי ממוצעים חסרים מתמטית ולא אקראית
         ma100_series = close.rolling(100).mean().bfill().fillna(last)
         ma200_series = close.rolling(200).mean().bfill().fillna(last)
         
@@ -360,7 +359,6 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        # --- משיכת נתוני דוחות ופונדמנטלס ---
         info = {}
         try:
             info = t.info if hasattr(t, 'info') and t.info else {}
@@ -394,33 +392,18 @@ def analyze_ticker(ticker):
                     earnings_text = f"תחזית ירידה (EPS נוכחי: {eps_trail} | עתידי: {eps_forw})"
                     earnings_badge = "ירידה עתידית"
                     earnings_pos = False
-            else:
-                try:
-                    inc = t.quarterly_income_stmt
-                    if not inc.empty and "Net Income" in inc.index:
-                        ni = inc.loc["Net Income"].dropna()
-                        if len(ni) >= 2:
-                            if ni.iloc[0] > ni.iloc[1]:
-                                earnings_text = "שיפור ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "שיפור"
-                                earnings_pos = True
-                            else:
-                                earnings_text = "הרעה ברווח הנקי ברבעון האחרון"
-                                earnings_badge = "הרעה"
-                                earnings_pos = False
-                except:
-                    pass
 
-        # --- אופציות אמת מהבורסה ---
+        # --- אופציות אמת מהבורסה (חיבור נקי לאופציות בלבד) ---
         options_text = "אין נתוני אופציות"
         try:
-            opts = t.options
+            t_opt = yf.Ticker(ticker) # יצירת אובייקט נקי ללא Session כדי לשמור עוגיות של יאהו
+            opts = t_opt.options
             if opt_dates := list(opts):
                 nearest = opt_dates[0]
-                chain = t.option_chain(nearest)
+                chain = t_opt.option_chain(nearest)
                 if 'openInterest' in chain.calls.columns and 'openInterest' in chain.puts.columns:
-                    calls_oi = chain.calls['openInterest'].sum()
-                    puts_oi = chain.puts['openInterest'].sum()
+                    calls_oi = chain.calls['openInterest'].fillna(0).sum()
+                    puts_oi = chain.puts['openInterest'].fillna(0).sum()
                     total_oi = calls_oi + puts_oi
                     if total_oi > 0:
                         calls_ratio = (calls_oi / total_oi) * 100
@@ -431,7 +414,6 @@ def analyze_ticker(ticker):
         except Exception:
             pass
 
-        # --- צמיחה בהכנסות ---
         rev_growth = info.get("revenueGrowth")
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
@@ -445,7 +427,6 @@ def analyze_ticker(ticker):
             forecast_text = "אין תחזית הכנסות זמינה"
             forecast_pos = None
 
-        # --- המלצות אנליסטים אמת ---
         rec_key = info.get("recommendationKey")
         num_analysts = info.get("numberOfAnalystOpinions")
         
@@ -460,7 +441,7 @@ def analyze_ticker(ticker):
                 "outperform": "תשואת יתר"
             }
             translated_rec = hebrew_rec.get(rec_key, rec_key.replace('_', ' ').title())
-            analyst_text = f"מבוסס על {num_analysts} মোহ" if num_analysts else "קונצנזוס"
+            analyst_text = f"מבוסס על {num_analysts} אנליסטים" if num_analysts else "קונצנזוס"
             rec_text = f"המלצה: {translated_rec} ({analyst_text})"
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy", "outperform"]
@@ -638,6 +619,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .mrow-dn{{font-size:0.72rem;font-weight:600;color:#dc2626;background:rgba(220,38,38,0.1);padding:2px 7px;border-radius:2px}}
 .quote-strip{{background:#c9a84c;padding:22px 40px;text-align:center}}
 .quote-text{{font-family:'Playfair Display',serif;font-size:1.1rem;font-style:italic;font-weight:700;color:#0a0a08}}
+.quote-src{{font-size:0.7rem;font-weight:600;letter-spacing:0.1em;color:rgba(10,10,8,0.5);margin-top:6px;text-transform:uppercase}}
 .modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(12px)}}
 .modal-overlay.open{{display:flex}}
 .modal{{background:#141410;border:1px solid rgba(201,168,76,0.12);border-radius:4px;padding:40px;max-width:440px;width:90%;text-align:center}}
@@ -686,7 +668,8 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   </div>
 </section>
 <div class="quote-strip">
-  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות" <span style="font-size: 0.8em; color: rgba(10,10,8,0.7); font-style: normal; font-weight: 600;">— וורן באפט</span></div>
+  <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות"</div>
+  <div class="quote-src">— Warren Buffett</div>
 </div>
 <script>
 const QUOTES  = {quotes_json};
@@ -1001,21 +984,16 @@ with tab_fear_greed:
 <h3 style="font-family: 'Playfair Display', serif; color: #c9a84c; font-size: 1.2rem; margin-bottom: 5px;">CNN Fear & Greed Index</h3>
 <p style="color: #9a8f7a; font-size: 0.8rem; margin-bottom: 15px;">מדד הסנטימנט הרשמי והחי מוול סטריט</p>
 <div style="position: relative; width: 300px; height: 150px; margin: 20px auto; overflow: hidden;">
-<!-- קשת מחולקת ל-5 מקטעי צבע מדויקים לפי האחוזים של CNN -->
 <div style="position: absolute; top: 0; left: 0; width: 300px; height: 300px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg 44deg, #141410 44deg 45deg, #f59e0b 45deg 80deg, #141410 80deg 81deg, #9ca3af 81deg 98deg, #141410 98deg 99deg, #84cc16 99deg 134deg, #141410 134deg 135deg, #16a34a 135deg 180deg, #141410 180deg 360deg);"></div>
-<!-- מעגל פנימי שחור שיוצר את עובי הקשת -->
 <div style="position: absolute; top: 30px; left: 30px; width: 240px; height: 240px; border-radius: 50%; background: #141410;"></div>
-<!-- טקסטים הממוקמים בזוויות המדויקות על הקשת -->
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #dc2626; width: 60px; text-align: center; left: 49px; top: 108px; transform: translate(-50%, -50%) rotate(-67.5deg); line-height: 1.2;">Extreme<br>Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; width: 60px; text-align: center; left: 100px; top: 52px; transform: translate(-50%, -50%) rotate(-27deg);">Fear</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; width: 60px; text-align: center; left: 150px; top: 38px; transform: translate(-50%, -50%);">Neutral</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #84cc16; width: 60px; text-align: center; left: 200px; top: 52px; transform: translate(-50%, -50%) rotate(27deg);">Greed</div>
 <div style="position: absolute; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #16a34a; width: 60px; text-align: center; left: 251px; top: 108px; transform: translate(-50%, -50%) rotate(67.5deg); line-height: 1.2;">Extreme<br>Greed</div>
-<!-- ערך מספרי גדול באמצע השעון -->
 <div style="position: absolute; bottom: 15px; left: 0; right: 0; text-align: center; z-index: 5;">
 <span style="font-size: 3.5rem; font-weight: 900; color: #f0ede6; font-family: 'Inter', sans-serif; line-height: 1;">{fg_val}</span>
 </div>
-<!-- מחוג משודרג ומעוצב -->
 <div style="position: absolute; bottom: 0; left: 147px; width: 6px; height: 125px; background: #f0ede6; border-radius: 4px 4px 0 0; transform-origin: bottom center; transform: rotate({needle_angle}deg); z-index: 10; box-shadow: 0 0 5px rgba(0,0,0,0.5); transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);">
 <div style="position: absolute; bottom: -8px; left: -5px; width: 16px; height: 16px; background: #f0ede6; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
 </div>
@@ -1094,15 +1072,17 @@ with tab_market_dir:
                 # 1. בדיקת סנטימנט אופציות
                 calls_oi, puts_oi = 0, 0
                 try:
-                    opts = qqq.options
+                    # שימוש באובייקט נקי ללא Session מותאם כדי לשמור על קוקיז של יאהו לאופציות
+                    qqq_opt = yf.Ticker("QQQ")
+                    opts = qqq_opt.options
                     if opts:
-                        # שינוי משמעותי: משיכת תאריך פקיעה אחד בלבד כדי למנוע קריסה מ-Rate Limit
+                        # משיכת תאריך פקיעה קרוב אחד כדי להימנע מחסימת Rate Limit
                         for date in opts[:1]:
-                            chain = qqq.option_chain(date)
+                            chain = qqq_opt.option_chain(date)
                             if 'openInterest' in chain.calls.columns:
-                                calls_oi += chain.calls['openInterest'].sum()
+                                calls_oi += chain.calls['openInterest'].fillna(0).sum()
                             if 'openInterest' in chain.puts.columns:
-                                puts_oi += chain.puts['openInterest'].sum()
+                                puts_oi += chain.puts['openInterest'].fillna(0).sum()
                 except Exception:
                     pass # ממשיך הלאה גם אם האופציות נחסמו נקודתית
                 
@@ -1234,7 +1214,7 @@ with tab_market_dir:
                     """, unsafe_allow_html=True)
                     
             except Exception as e:
-                st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
+                st.error(f"אירעה שגיאה בניתוח המדד. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע.")
 
 # ── 3. רינדור החלק התחתון (Features, How it works, Footer) ──
 bottom_html = """<!DOCTYPE html>
