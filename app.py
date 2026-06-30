@@ -480,6 +480,95 @@ def _fetch_history_with_retry(ticker, attempts=3):
     return pd.DataFrame(), None, last_error
 
 
+def _get_yahoo_crumb_session():
+    """יוצרת session עם cookies + crumb token תקין מול יאהו.
+    זהו הבסיס המשותף לכל בקשות ה-API הנסתרות (אופציות, נתוני יסוד וכו')."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    session = requests.Session()
+    session.headers.update(headers)
+    crumb = ""
+    try:
+        session.get('https://fc.yahoo.com', timeout=8)
+    except Exception:
+        pass
+    try:
+        session.get('https://finance.yahoo.com/quote/AAPL', timeout=8)
+    except Exception:
+        pass
+    try:
+        crumb_res = session.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=8)
+        if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
+            crumb = crumb_res.text.strip()
+    except Exception:
+        pass
+    return session, crumb
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_fundamentals(ticker_symbol):
+    """
+    מושך נתוני יסוד (דוחות, תחזיות, המלצות אנליסטים) ישירות מ-quoteSummary של יאהו,
+    עם crumb token תקין ועד 3 ניסיונות חוזרים - במקום t.info השביר שנכשל בלי אזהרה.
+    """
+    modules = "financialData,defaultKeyStatistics,earningsTrend,recommendationTrend,summaryDetail"
+    merged = {}
+
+    for attempt in range(3):
+        try:
+            session, crumb = _get_yahoo_crumb_session()
+            url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
+            params = {"modules": modules}
+            if crumb:
+                params["crumb"] = crumb
+            res = session.get(url, params=params, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                results = data.get("quoteSummary", {}).get("result", [])
+                if results:
+                    r = results[0]
+                    fin = r.get("financialData", {}) or {}
+                    stats = r.get("defaultKeyStatistics", {}) or {}
+                    summ = r.get("summaryDetail", {}) or {}
+
+                    def _raw(d, key):
+                        v = d.get(key)
+                        if isinstance(v, dict):
+                            return v.get("raw")
+                        return v
+
+                    merged["revenueGrowth"] = _raw(fin, "revenueGrowth")
+                    merged["recommendationKey"] = fin.get("recommendationKey")
+                    merged["numberOfAnalystOpinions"] = _raw(fin, "numberOfAnalystOpinions")
+                    merged["earningsQuarterlyGrowth"] = _raw(stats, "earningsQuarterlyGrowth")
+                    merged["trailingEps"] = _raw(stats, "trailingEps")
+                    merged["forwardEps"] = _raw(stats, "forwardEps")
+
+                    if any(v is not None for v in merged.values()):
+                        return merged
+        except Exception:
+            pass
+        time.sleep(1.2 * (attempt + 1))
+
+    # ───── גיבוי: ניסיון דרך yfinance הרגיל אם הבקשה הידנית נכשלה ─────
+    try:
+        t_fallback = yf.Ticker(ticker_symbol, session=get_session())
+        info = t_fallback.info or {}
+        if info:
+            for key in ["revenueGrowth", "recommendationKey", "numberOfAnalystOpinions",
+                        "earningsQuarterlyGrowth", "trailingEps", "forwardEps"]:
+                if merged.get(key) is None:
+                    merged[key] = info.get(key)
+    except Exception:
+        pass
+
+    return merged
+
+
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
@@ -541,11 +630,7 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = "ניטרלי", None
 
-        info = {}
-        try:
-            info = t.info if hasattr(t, 'info') and t.info else {}
-        except Exception:
-            pass
+        info = fetch_fundamentals(clean_ticker)
 
         earnings_text = "אין נתונים מספיקים להערכה"
         earnings_badge = "לא זמין"
@@ -623,8 +708,9 @@ def analyze_ticker(ticker):
             rec_pos = None
 
         ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
-        up = last > ma9_val
-        trend_status = "שורי (דומיננטיות קונים ברורה)" if up else "דובי (לחץ מוכרים מוגבר)"
+        trend_up = last > ma9_val  # משמש רק לטקסט המגמה (לונג/שורט), לא לתג עלה/ירד
+        up = chg >= 0  # התג "עלה/ירד" תמיד תואם בדיוק לאחוז השינוי המוצג
+        trend_status = "שורי (דומיננטיות קונים ברורה)" if trend_up else "דובי (לחץ מוכרים מוגבר)"
         
         formatted_opinion = (
             f"🎯 <b>מסקנה אנליטית:</b> מניית {clean_ticker} נמצאת כעת במבנה מחירים <b>{trend_status}</b> בטווח הקצר המיידי.<br/>"
