@@ -23,7 +23,7 @@ except ImportError:
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
-# ניהול רענון נתוני לייב (Fix #1)
+# ניהול רענון נתוני לייב
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = datetime.now().strftime("%H:%M:%S")
 
@@ -166,7 +166,6 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
-# שינוי זמן רענון ל-30 שניות עבור נתונים בזמן אמת (Fix #1)
 @st.cache_data(ttl=30)
 def fetch_quotes():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]
@@ -241,7 +240,6 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
-# פונקציית Options מהירה וישירה (ללא חסימות ישנות)
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_options_sentiment(ticker_symbol):
     try:
@@ -260,7 +258,6 @@ def fetch_options_sentiment(ticker_symbol):
     except:
         return 0, 0
 
-# פונקציית Fundamentals אמינה וישירה מ-yfinance
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_fundamentals(ticker_symbol):
     try:
@@ -281,24 +278,26 @@ def do_scan(mode):
         status.markdown(f"<div style='color:#c9a84c;font-size:0.85rem;text-align:center;margin-bottom:10px;'>🔍 סורק {ticker}... ({i+1}/{total})</div>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
-            t = yf.Ticker(ticker)  # הוסר ה-session (Fix #4 & #6)
+            t = yf.Ticker(ticker)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
-            if df.empty or len(df) < 30:
+            # בדיקת מינימום 200 ימי מסחר כדי שממוצעי ה-100 ו-200 יהיו מדויקים ולא יזייפו
+            if df.empty or len(df) < 200:
                 continue
                 
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
+            if len(df) < 200:
+                continue
             
             close = df["Close"]
             last  = float(close.iloc[-1])
             prev  = float(close.iloc[-2])
             rsi   = calculate_rsi(close)
             
-            ma9_series = close.rolling(9).mean()
-            ma9   = float(ma9_series.iloc[-1])
-            ma100 = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
-            ma200 = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
+            ma9   = float(close.rolling(9).mean().iloc[-1])
+            ma100 = float(close.rolling(100).mean().iloc[-1])
+            ma200 = float(close.rolling(200).mean().iloc[-1])
             
             vol_today = int(df["Volume"].iloc[-1])
             vol_yest = int(df["Volume"].iloc[-2])
@@ -311,12 +310,25 @@ def do_scan(mode):
             open_3, close_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3])
             
             if mode == "long":
-                exclusion = (last > ma9 and last > ma100 and last > ma200)
-                if (rsi < 70 and vol > 300_000 and close_1 > open_1 and last > prev and not exclusion): 
+                # בדיקה שהמניה רחוקה מלהיות מתוחה מדי כלפי מטה או מעלה
+                overextended = (last > ma9) and (last > ma100) and (last > ma200)
+                crashing = (last < ma9) and (last < ma100) and (last < ma200)
+                
+                if (last > ma9 and rsi < 70 and vol > 300_000 
+                    and not overextended 
+                    and not crashing 
+                    and close_1 > open_1 
+                    and last > prev):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
-                if (rsi > 30 and vol > 300_000 and two_consecutive_negative_closes):
+                # אכיפה הרמטית של סורק שורט: נרות חייבים להיות *אדומים* טהורים וגם נמוכים מקודמיהם
+                is_red_1 = close_1 < open_1
+                is_red_2 = close_2 < open_2
+                is_red_3 = close_3 < open_3
+                
+                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
+                
+                if (rsi > 30 and vol > 300_000 and three_consecutive_down_and_red):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -361,10 +373,12 @@ def analyze_ticker(ticker):
         
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        ma100_val = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
-        ma200_val = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
-        
-        ma_status, ma_pos = ("לונג", True) if (last > ma100_val and last > ma200_val) else ("שורט", False) if (last < ma100_val and last < ma200_val) else ("ניטרלי", None)
+        if len(df) >= 200:
+            ma100_val = float(close.rolling(100).mean().iloc[-1])
+            ma200_val = float(close.rolling(200).mean().iloc[-1])
+            ma_status, ma_pos = ("לונג", True) if (last > ma100_val and last > ma200_val) else ("שורט", False) if (last < ma100_val and last < ma200_val) else ("ניטרלי", None)
+        else:
+            ma_status, ma_pos = ("חסר נתונים", None)
 
         info = fetch_fundamentals(clean_ticker)
 
@@ -396,7 +410,7 @@ def analyze_ticker(ticker):
 
         trend_status = "שורי (קונים דומיננטיים)" if last > float(close.rolling(9).mean().iloc[-1]) else "דובי (מוכרים דומיננטיים)"
         
-        # המלצת AI אמיתית (Fix #5)
+        # המלצת AI
         ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
         if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
             try:
@@ -616,6 +630,7 @@ with tab_long:
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
     <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל 9, 100 ו-200 במקביל.</li>
+    <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-9, 100 ו-200 בו זמנית. (נדרש מינימום 200 ימי מסחר קיימים)</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -687,7 +702,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: שני ימי מסחר רצופים של סגירות שליליות</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -735,9 +750,7 @@ with tab_short:
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
-                            
                             calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
-                            
                             if puts_oi > calls_oi:
                                 ticker_obj = yf.Ticker(ticker_sym)
                                 hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
@@ -797,10 +810,17 @@ with tab_ai:
                 with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                     try:
                         genai.configure(api_key=GEMINI_API_KEY)
-                        # מעודכן למודל חזק יותר, יחד עם נתוני התאריך הנוכחיים לבסיס ידע מעודכן
                         model = genai.GenerativeModel('gemini-1.5-pro')
-                        current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        prompt_text = f"התאריך והשעה כעת הם {current_date}. אתה מומחה פיננסי מערכת 'The Mind Changer'. השתמש במידע העדכני ביותר שיש לך וציין במידת הצורך אם משהו חסר. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה: {q}"
+                        current_date = datetime.now().strftime("%d/%m/%Y")
+                        prompt_text = f"""
+                        היום אנחנו בתאריך {current_date}.
+                        אתה יועץ פיננסי ואנליסט טכני בכיר של המערכת 'The Mind Changer'.
+                        
+                        חוק ברזל: אם המשתמש שואל על מחיר נוכחי של מניה, או על מצב השוק להיום, הסבר לו באדיבות שהמידע שאתה יכול לייצר בטקסט החופשי עלול שלא להיות מעודכן לשנייה זו, והפנה אותו להקליד את שם המניה בתיבת "ניתוח מניה בודדת" שנמצאת בצד ימין - שם המערכת שואבת נתוני לייב ישירות מהבורסה. בשום פנים ואופן אל תמציא מחירי מניות להיום.
+                        
+                        ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).
+                        השאלה: {q}
+                        """
                         response = model.generate_content(prompt_text)
                         st.session_state.ai_answer = response.text
                     except Exception as e:
@@ -947,9 +967,55 @@ with tab_market_dir:
                 """, unsafe_allow_html=True)
                 
                 if verdict == "לונג":
-                    st.markdown("""<div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);"><div style="font-size: 4rem; margin-bottom: 10px;">🚀 🟢</div><div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 20px rgba(22,163,74,0.4); letter-spacing: 0.05em;">השוק לונג</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים והניקוד המצטבר מצביעים על מומנטום חיובי ושליטת קונים.</div></div>""", unsafe_allow_html=True)
+                    reasons_html_long = "<ul>"
+                    if opt_status == "קולים": reasons_html_long += "<li><b>שוק האופציות:</b> דומיננטיות ברורה של משקיעים שרוכשים קולים (צפי לעליות).</li>"
+                    if pa_status == "לונג": reasons_html_long += "<li><b>פעולת המחיר:</b> סגירות יומיות גבוהות יותר ומבנה שורי (קונים חזקים).</li>"
+                    if ma_status == "לונג": reasons_html_long += "<li><b>ממוצעים:</b> המדד נסחר מעל ממוצעים 100 ו-200, אישור למגמת עלייה יציבה.</li>"
+                    if rsi_val > 50: reasons_html_long += f"<li><b>מומנטום:</b> מדד ה-RSI עומד על {rsi_val:.1f}, מומנטום חיובי וזרימת כספים פנימה.</li>"
+                    reasons_html_long += "</ul>"
+                    
+                    st.markdown(f"""
+                    <div style="background: radial-gradient(circle at top, rgba(22,163,74,0.2) 0%, rgba(10,10,8,1) 80%); border: 2px solid #16a34a; padding: 40px; text-align: right; border-radius: 12px; margin-top: 25px; box-shadow: 0 15px 50px rgba(22,163,74,0.25); position: relative; overflow: hidden; direction: rtl;">
+                        <div style="position: absolute; top: -50px; left: -50px; font-size: 15rem; opacity: 0.05; user-select: none;">🚀</div>
+                        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+                            <div style="font-size: 4rem; margin-left: 20px;">🟢</div>
+                            <div style="font-size: 3.8rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 25px rgba(22,163,74,0.6); letter-spacing: 0.05em;">השוק בלונג</div>
+                        </div>
+                        <div style="border-top: 1px solid rgba(22,163,74,0.3); margin: 25px 0;"></div>
+                        <h4 style="color: #f0ede6; font-size: 1.2rem; margin-bottom: 15px;">למה המערכת מזהה לונג מובהק?</h4>
+                        <div style="color: #e5e5e5; font-size: 0.95rem; line-height: 1.8;">
+                            {reasons_html_long}
+                        </div>
+                        <div style="margin-top: 20px; font-size: 0.85rem; color: #9a8f7a;">
+                            <b>מסקנה לפעולה:</b> סביבה זו אידיאלית למסחר לונג. המומנטום חיובי והשוק דוחף למעלה.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 elif verdict == "שורט":
-                    st.markdown("""<div style="background: linear-gradient(135deg, rgba(220,38,38,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #dc2626; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(220,38,38,0.15);"><div style="font-size: 4rem; margin-bottom: 10px;">🩸 🔴</div><div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 20px rgba(220,38,38,0.4); letter-spacing: 0.05em;">השוק בשורט</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים והניקוד המצטבר מצביעים על חולשה מהותית ושליטת מוכרים.</div></div>""", unsafe_allow_html=True)
+                    reasons_html_short = "<ul>"
+                    if opt_status == "פוטים": reasons_html_short += "<li><b>שוק האופציות:</b> משקיעים כבדים רוכשים פוטים (הגנות), מה שמעיד על לחץ וציפייה לירידות.</li>"
+                    if pa_status == "שורט": reasons_html_short += "<li><b>פעולת המחיר:</b> סגירות יומיות נמוכות יותר המעידות על פאניקה ומוכרים אגרסיביים.</li>"
+                    if ma_status == "שורט": reasons_html_short += "<li><b>ממוצעים:</b> המדד שבר כלפי מטה תמיכות קריטיות והוא במגמה שלילית.</li>"
+                    if rsi_val < 50: reasons_html_short += f"<li><b>מומנטום:</b> מדד ה-RSI עומד על {rsi_val:.1f} ומעיד על זליגת כספים החוצה.</li>"
+                    reasons_html_short += "</ul>"
+                    
+                    st.markdown(f"""
+                    <div style="background: radial-gradient(circle at top, rgba(220,38,38,0.2) 0%, rgba(10,10,8,1) 80%); border: 2px solid #dc2626; padding: 40px; text-align: right; border-radius: 12px; margin-top: 25px; box-shadow: 0 15px 50px rgba(220,38,38,0.25); position: relative; overflow: hidden; direction: rtl;">
+                        <div style="position: absolute; top: -50px; left: -50px; font-size: 15rem; opacity: 0.05; user-select: none;">🐻</div>
+                        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+                            <div style="font-size: 4rem; margin-left: 20px;">📉</div>
+                            <div style="font-size: 3.8rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 25px rgba(220,38,38,0.6); letter-spacing: 0.05em;">השוק בשורט</div>
+                        </div>
+                        <div style="border-top: 1px solid rgba(220,38,38,0.3); margin: 25px 0;"></div>
+                        <h4 style="color: #f0ede6; font-size: 1.2rem; margin-bottom: 15px;">למה המערכת מזהה שורט מובהק?</h4>
+                        <div style="color: #e5e5e5; font-size: 0.95rem; line-height: 1.8;">
+                            {reasons_html_short}
+                        </div>
+                        <div style="margin-top: 20px; font-size: 0.85rem; color: #9a8f7a;">
+                            <b>מסקנה לפעולה:</b> סביבה זו מסוכנת ללונג. רצוי להתמקד בהזדמנויות שורט, לגדר תיקים, ולהימנע מתפיסת "סכינים נופלות".
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
                     st.markdown("""<div style="background: linear-gradient(135deg, rgba(201,168,76,0.05) 0%, rgba(10,10,8,1) 100%); border: 1px solid rgba(201,168,76,0.3); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px;"><div style="font-size: 3rem; margin-bottom: 10px;">⚖️</div><div style="font-size: 2.2rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #c9a84c; letter-spacing: 0.05em;">מגמה מעורבת לחלוטין</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">הכוחות בשוק מאזנים לחלוטין זה את זה. המתנה להכרעה ברורה.</div></div>""", unsafe_allow_html=True)
                     
