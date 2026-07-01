@@ -7,6 +7,7 @@ import requests
 import os
 import contextlib
 import time
+from datetime import datetime
 
 # משיכת המפתח מתוך הסודות של Streamlit או הגדרה מקומית
 try:
@@ -21,6 +22,19 @@ except ImportError:
     GENAI_AVAILABLE = False
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
+
+# ניהול רענון נתוני לייב (Fix #1)
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = datetime.now().strftime("%H:%M:%S")
+
+col_empty, col_btn = st.columns([9, 1.2])
+with col_btn:
+    st.markdown('<div style="padding-top: 10px;">', unsafe_allow_html=True)
+    if st.button("🔄 רענן נתונים", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.last_refresh = datetime.now().strftime("%H:%M:%S")
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ── ה-CSS המקורי של הפאנלים והעיצוב הכללי ──
 SHARED_CSS = """
@@ -99,10 +113,12 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     border-bottom-color: #c9a84c !important;
 }}
 
-div.stButton > button {{
+/* עיצוב כפתורי Form שיהיו זהים לכפתורים הרגילים */
+div[data-testid="stForm"] {{ border: none !important; padding: 0 !important; background: transparent !important; }}
+div[data-testid="stFormSubmitButton"] > button, div.stButton > button {{
     width: 100% !important;
     padding: 11px !important;
-    border-radius: 0 0 4px 4px !important;
+    border-radius: 4px !important;
     font-size: 0.78rem !important;
     font-weight: 900 !important;
     color: #000000 !important;
@@ -111,14 +127,15 @@ div.stButton > button {{
     cursor: pointer !important;
     border: none !important;
     transition: opacity .2s !important;
-    margin-top: -2px !important;
+    margin-top: 5px !important;
 }}
-div.stButton > button:hover {{ opacity: 0.88 !important; }}
+div[data-testid="stFormSubmitButton"] > button:hover, div.stButton > button:hover {{ opacity: 0.88 !important; }}
 
-.long-btn div[data-testid="stButton"] button {{ background-color: #16a34a !important; color: #000000 !important; }}
-.short-btn div[data-testid="stButton"] button {{ background-color: #dc2626 !important; color: #000000 !important; }}
-.gold-btn div[data-testid="stButton"] button {{ background-color: #c9a84c !important; color: #000000 !important; }}
-.stop-btn div[data-testid="stButton"] button {{ background-color: #9ca3af !important; color: #000000 !important; border: 1px solid #4b5563 !important; }}
+div[data-testid="stFormSubmitButton"] > button {{ background-color: #c9a84c !important; }}
+.long-btn div.stButton > button {{ background-color: #16a34a !important; color: #000000 !important; }}
+.short-btn div.stButton > button {{ background-color: #dc2626 !important; color: #000000 !important; }}
+.gold-btn div.stButton > button {{ background-color: #c9a84c !important; color: #000000 !important; }}
+.stop-btn div.stButton > button {{ background-color: #9ca3af !important; color: #000000 !important; border: 1px solid #4b5563 !important; }}
 
 div[data-testid="stTextInput"] input {{
     background-color: #141410 !important;
@@ -131,151 +148,6 @@ div[data-testid="stTextInput"] input {{
 }}
 </style>
 """, unsafe_allow_html=True)
-
-def get_session():
-    agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
-    ]
-    s = requests.Session()
-    s.headers.update({
-        'User-Agent': random.choice(agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-    })
-    return s
-
-def _fetch_options_sentiment_raw(ticker_symbol):
-    calls_oi, puts_oi = 0, 0
-    got_valid_response = False
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-    }
-
-    for attempt in range(3):
-        try:
-            session = requests.Session()
-            session.headers.update(headers)
-            session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=10)
-
-            crumb = ""
-            try:
-                crumb_res = session.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
-                if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
-                    crumb = crumb_res.text.strip()
-            except Exception:
-                pass
-
-            url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
-            params = {"crumb": crumb} if crumb else {}
-            res = session.get(url, params=params, timeout=10)
-
-            if res.status_code == 200:
-                data = res.json()
-                result = data.get('optionChain', {}).get('result', [])
-                if result:
-                    got_valid_response = True 
-                    all_dates = result[0].get('expirationDates', [])
-                    dates_to_scan = all_dates[:4] if all_dates else [None]
-
-                    for exp_date in dates_to_scan:
-                        try:
-                            if exp_date:
-                                scan_url = f"{url}?date={exp_date}"
-                                if crumb:
-                                    scan_url += f"&crumb={crumb}"
-                                scan_res = session.get(scan_url, timeout=10)
-                                scan_data = scan_res.json()
-                                opts_list = scan_data.get('optionChain', {}).get('result', [])
-                            else:
-                                opts_list = result
-
-                            if not opts_list:
-                                continue
-                            opts = opts_list[0].get('options', [])
-                            if not opts:
-                                continue
-                            opts = opts[0]
-
-                            for c in opts.get('calls', []):
-                                oi = c.get('openInterest')
-                                if oi is not None:
-                                    calls_oi += oi
-                            for p in opts.get('puts', []):
-                                oi = p.get('openInterest')
-                                if oi is not None:
-                                    puts_oi += oi
-                        except Exception:
-                            continue
-
-                    if calls_oi > 0 or puts_oi > 0:
-                        return calls_oi, puts_oi
-        except Exception:
-            pass
-        time.sleep(1.5 * (attempt + 1))
-
-    for attempt in range(2):
-        try:
-            s2 = requests.Session()
-            s2.headers.update(headers)
-            t = yf.Ticker(ticker_symbol, session=s2)
-            dates = t.options
-            if dates:
-                got_valid_response = True
-                for date in dates[:4]:
-                    try:
-                        chain = t.option_chain(date)
-                        if 'openInterest' in chain.calls.columns:
-                            calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                        if 'openInterest' in chain.puts.columns:
-                            puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
-                    except Exception:
-                        continue
-                if calls_oi > 0 or puts_oi > 0:
-                    return calls_oi, puts_oi
-        except Exception:
-            pass
-        time.sleep(1.5 * (attempt + 1))
-
-    try:
-        t2 = yf.Ticker(ticker_symbol)
-        dates2 = t2.options
-        if dates2:
-            got_valid_response = True
-            for date in dates2[:2]:
-                try:
-                    chain2 = t2.option_chain(date)
-                    if 'openInterest' in chain2.calls.columns:
-                        calls_oi += int(chain2.calls['openInterest'].fillna(0).sum())
-                    if 'openInterest' in chain2.puts.columns:
-                        puts_oi += int(chain2.puts['openInterest'].fillna(0).sum())
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    if got_valid_response:
-        return calls_oi, puts_oi
-
-    raise RuntimeError(f"לא ניתן היה לקבל תשובה מיאהו עבור אופציות {ticker_symbol}")
-
-@st.cache_data(ttl=900, show_spinner=False)
-def _fetch_options_sentiment_cached(ticker_symbol):
-    return _fetch_options_sentiment_raw(ticker_symbol)
-
-def fetch_options_sentiment(ticker_symbol):
-    try:
-        return _fetch_options_sentiment_cached(ticker_symbol)
-    except Exception:
-        try:
-            return _fetch_options_sentiment_raw(ticker_symbol)
-        except Exception:
-            return 0, 0
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -294,7 +166,8 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
-@st.cache_data(ttl=300)
+# שינוי זמן רענון ל-30 שניות עבור נתונים בזמן אמת (Fix #1)
+@st.cache_data(ttl=30)
 def fetch_quotes():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]
     results = []
@@ -310,7 +183,7 @@ def fetch_quotes():
             pass
     return results
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def fetch_indices():
     mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}
     results = []
@@ -326,7 +199,7 @@ def fetch_indices():
             pass
     return results
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=30)
 def fetch_live_stocks():
     syms    = ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]
     results = []
@@ -346,12 +219,11 @@ def get_fear_greed_data():
     try:
         url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0",
             "Accept": "application/json, text/plain, */*",
-            "Referer": "https://edition.cnn.com/",
             "Origin": "https://edition.cnn.com"
         }
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             data = r.json()
             val = round(data.get("fear_and_greed", {}).get("score", 55))
@@ -369,10 +241,38 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
+# פונקציית Options מהירה וישירה (ללא חסימות ישנות)
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_options_sentiment(ticker_symbol):
+    try:
+        t = yf.Ticker(ticker_symbol)
+        dates = t.options
+        calls_oi, puts_oi = 0, 0
+        if dates:
+            for date in dates[:2]:
+                try:
+                    chain = t.option_chain(date)
+                    calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                    puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+                except:
+                    continue
+        return calls_oi, puts_oi
+    except:
+        return 0, 0
+
+# פונקציית Fundamentals אמינה וישירה מ-yfinance
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_fundamentals(ticker_symbol):
+    try:
+        t = yf.Ticker(ticker_symbol)
+        info = t.info or {}
+        return info
+    except:
+        return {}
+
 def do_scan(mode):
     tickers  = load_tickers()
     results  = []
-    session  = get_session()
     progress = st.progress(0)
     status   = st.empty()
     total    = len(tickers)
@@ -381,20 +281,15 @@ def do_scan(mode):
         status.markdown(f"<div style='color:#c9a84c;font-size:0.85rem;text-align:center;margin-bottom:10px;'>🔍 סורק {ticker}... ({i+1}/{total})</div>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)  # הוסר ה-session (Fix #4 & #6)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                # שינוי משמעותי: לא מבקשים "max" שגורם לחסימות מהירות ביאהו, מספיק 5 שנים בשביל ATH
-                df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
+                df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
             if df.empty or len(df) < 30:
                 continue
                 
-            ath = float(df["High"].max())
-            
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
-            if len(df) < 3:
-                continue
-                
+            
             close = df["Close"]
             last  = float(close.iloc[-1])
             prev  = float(close.iloc[-2])
@@ -402,65 +297,26 @@ def do_scan(mode):
             
             ma9_series = close.rolling(9).mean()
             ma9   = float(ma9_series.iloc[-1])
-            
             ma100 = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
             ma200 = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
             
-            # בדיקת מחזור חכמה - מונעת נפילות בתחילת יום כשהמחזור עוד קטן
-            vol_today = int(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0
-            vol_yest = int(df["Volume"].iloc[-2]) if "Volume" in df.columns and len(df) > 1 else 0
+            vol_today = int(df["Volume"].iloc[-1])
+            vol_yest = int(df["Volume"].iloc[-2])
             vol = max(vol_today, vol_yest) 
             
             chg   = round(((last - prev) / prev) * 100, 2)
             
-            open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
-            open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
-            open_3, close_3_val, high_3, low_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3]), float(df["High"].iloc[-3]), float(df["Low"].iloc[-3])
-            
-            body_1 = abs(close_1 - open_1)
-            lower_shadow_1 = min(open_1, close_1) - low_1
-            upper_shadow_1 = high_1 - max(open_1, close_1)
-            is_hammer_today_relaxed = (body_1 >= 0) and (lower_shadow_1 >= 1.5 * body_1) and (upper_shadow_1 <= 1.5 * body_1)
-            is_hammer_today_strict = (body_1 > 0) and (lower_shadow_1 >= 2 * body_1) and (upper_shadow_1 <= body_1)
-            
-            body_2 = abs(close_2 - open_2)
-            lower_shadow_2 = min(open_2, close_2) - low_2
-            upper_shadow_2 = high_2 - max(open_2, close_2)
-            is_hammer_yesterday_relaxed = (body_2 >= 0) and (lower_shadow_2 >= 1.5 * body_2) and (upper_shadow_2 <= 1.5 * body_2)
-            is_hammer_yesterday_strict = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
-            
-            body_3 = abs(close_3_val - open_3)
-            lower_shadow_3 = min(open_3, close_3_val) - low_3
-            upper_shadow_3 = high_3 - max(open_3, close_3_val)
-            is_hammer_day_3_relaxed = (body_3 >= 0) and (lower_shadow_3 >= 1.5 * body_3) and (upper_shadow_3 <= 1.5 * body_3)
-            is_hammer_day_3_strict = (body_3 > 0) and (lower_shadow_3 >= 2 * body_3) and (upper_shadow_3 <= body_3)
-            
-            recent_hammer_relaxed = is_hammer_today_relaxed or is_hammer_yesterday_relaxed or is_hammer_day_3_relaxed
-            recent_hammer_strict = is_hammer_today_strict or is_hammer_yesterday_strict or is_hammer_day_3_strict
-            
-            is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
+            open_1, close_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1])
+            open_2, close_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2])
+            open_3, close_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3])
             
             if mode == "long":
-                yesterday_green = (close_2 > open_2)
-                not_at_ath_long = last < (ath * 0.92)
-
-                if (last > ma9 and rsi < 70 and vol > 300_000
-                        and not (last > ma100 and last > ma200 and last > ma9)
-                        and not (last < ma100 and last < ma200 and last < ma9)
-                        and close_1 > open_1
-                        and last > prev
-                        and yesterday_green
-                        and recent_hammer_relaxed
-                        and not_at_ath_long): 
-                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True, "strict_hammer": recent_hammer_strict})
+                exclusion = (last > ma9 and last > ma100 and last > ma200)
+                if (rsi < 70 and vol > 300_000 and close_1 > open_1 and last > prev and not exclusion): 
+                    results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                three_consecutive_down = (close_1 < close_2) and (close_2 < close_3_val)
-                yesterday_red_star = is_shooting_star_yesterday and (close_2 < open_2)
-                today_red_lower = (close_1 < open_1) and (close_1 < close_2)
-                star_condition = yesterday_red_star and today_red_lower
-                short_pattern = three_consecutive_down or star_condition
-
-                if (rsi > 30 and vol > 300_000 and short_pattern):
+                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
+                if (rsi > 30 and vol > 300_000 and two_consecutive_negative_closes):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -470,234 +326,19 @@ def do_scan(mode):
 
 def normalize_ticker(raw_ticker):
     t = raw_ticker.strip().upper()
-    if t.startswith("^"):
-        return t
+    if t.startswith("^"): return t
     t = t.replace(" ", "")
-    if "." in t:
-        t = t.replace(".", "-")
+    if "." in t: t = t.replace(".", "-")
     return t
-
-def _fetch_history_with_retry(ticker, attempts=3):
-    last_error = None
-    for i in range(attempts):
-        try:
-            session = get_session()
-            t = yf.Ticker(ticker, session=session)
-            df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
-            if not df.empty and len(df) >= 30:
-                return df, t, None
-        except Exception as e:
-            last_error = e
-
-        try:
-            df2 = yf.download(ticker, period="1y", interval="1d", progress=False, threads=False)
-            if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
-                df2.columns = df2.columns.get_level_values(0)
-            if not df2.empty and len(df2) >= 30:
-                try:
-                    t_obj = yf.Ticker(ticker, session=get_session())
-                except Exception:
-                    t_obj = yf.Ticker(ticker)
-                return df2, t_obj, None
-        except Exception as e:
-            last_error = e
-
-        time.sleep(1.5 * (i + 1))
-
-    return pd.DataFrame(), None, last_error
-
-def _get_yahoo_crumb_session():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-    }
-    session = requests.Session()
-    session.headers.update(headers)
-    crumb = ""
-    try:
-        session.get('https://fc.yahoo.com', timeout=8)
-    except Exception:
-        pass
-    try:
-        session.get('https://finance.yahoo.com/quote/AAPL', timeout=8)
-    except Exception:
-        pass
-    try:
-        crumb_res = session.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=8)
-        if crumb_res.status_code == 200 and crumb_res.text and "Too Many Requests" not in crumb_res.text:
-            crumb = crumb_res.text.strip()
-    except Exception:
-        pass
-    return session, crumb
-
-_CRUMB_CACHE = {"session": None, "crumb": None, "ts": 0.0}
-_CRUMB_TTL_SECONDS = 25 * 60
-
-def get_shared_yahoo_session(force_refresh=False):
-    now = time.time()
-    cached_ok = (
-        not force_refresh
-        and _CRUMB_CACHE["session"] is not None
-        and _CRUMB_CACHE["crumb"]
-        and (now - _CRUMB_CACHE["ts"]) < _CRUMB_TTL_SECONDS
-    )
-    if cached_ok:
-        return _CRUMB_CACHE["session"], _CRUMB_CACHE["crumb"]
-
-    session, crumb = _get_yahoo_crumb_session()
-    if crumb:
-        _CRUMB_CACHE["session"] = session
-        _CRUMB_CACHE["crumb"] = crumb
-        _CRUMB_CACHE["ts"] = now
-        return session, crumb
-
-    if _CRUMB_CACHE["crumb"]:
-        return _CRUMB_CACHE["session"], _CRUMB_CACHE["crumb"]
-
-    return session, crumb
-
-def _fetch_fundamentals_raw(ticker_symbol):
-    merged = {}
-
-    def _raw(d, key):
-        v = d.get(key)
-        if isinstance(v, dict):
-            return v.get("raw")
-        return v
-
-    def _parse_beat_list(quarters):
-        beat = []
-        for q in quarters:
-            actual = _raw(q, "epsActual")
-            estimate = _raw(q, "epsEstimate")
-            if actual is not None and estimate is not None:
-                beat.append(actual >= estimate)
-        return beat[-4:]
-
-    def _has_data(d):
-        return any(v is not None for v in d.values() if not isinstance(v, list)) or bool(d.get("earnings_beat_list"))
-
-    for attempt in range(3):
-        try:
-            t = yf.Ticker(ticker_symbol)
-            try:
-                info = t.info or {}
-                if info and len(info) > 5:
-                    merged["revenueGrowth"]           = info.get("revenueGrowth")
-                    merged["recommendationKey"]        = info.get("recommendationKey")
-                    merged["numberOfAnalystOpinions"]  = info.get("numberOfAnalystOpinions")
-                    merged["earningsQuarterlyGrowth"]  = info.get("earningsQuarterlyGrowth")
-                    merged["trailingEps"]              = info.get("trailingEps")
-                    merged["forwardEps"]               = info.get("forwardEps")
-            except Exception:
-                pass
-
-            if not merged.get("earnings_beat_list"):
-                for attr in ["earnings_history", "quarterly_earnings"]:
-                    try:
-                        eh = getattr(t, attr, None)
-                        if eh is not None and not getattr(eh, "empty", True):
-                            cols = list(eh.columns) if hasattr(eh, "columns") else []
-                            if "epsActual" in cols and "epsEstimate" in cols:
-                                sub = eh.dropna(subset=["epsActual", "epsEstimate"]).tail(4)
-                                if not sub.empty:
-                                    merged["earnings_beat_list"] = [
-                                        bool(a >= e) for a, e in
-                                        zip(sub["epsActual"], sub["epsEstimate"])
-                                    ]
-                                    break
-                    except Exception:
-                        continue
-
-            if _has_data(merged):
-                return merged
-        except Exception:
-            pass
-        if attempt < 2:
-            time.sleep(1.5 * (attempt + 1))
-
-    modules = "financialData,defaultKeyStatistics,earningsHistory"
-    for attempt in range(3):
-        try:
-            force = (attempt > 0)
-            session, crumb = get_shared_yahoo_session(force_refresh=force)
-
-            for base in ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]:
-                try:
-                    url = f"{base}/v10/finance/quoteSummary/{ticker_symbol}"
-                    params = {"modules": modules}
-                    if crumb:
-                        params["crumb"] = crumb
-                    res = session.get(url, params=params, timeout=10)
-                    if res.status_code != 200:
-                        continue
-                    data = res.json()
-                    results = data.get("quoteSummary", {}).get("result", [])
-                    if not results:
-                        continue
-                    r = results[0]
-                    fin       = r.get("financialData", {}) or {}
-                    stats     = r.get("defaultKeyStatistics", {}) or {}
-                    earn_hist = r.get("earningsHistory", {}) or {}
-
-                    if merged.get("revenueGrowth") is None:
-                        merged["revenueGrowth"] = _raw(fin, "revenueGrowth")
-                    if merged.get("recommendationKey") is None:
-                        merged["recommendationKey"] = fin.get("recommendationKey")
-                    if merged.get("numberOfAnalystOpinions") is None:
-                        merged["numberOfAnalystOpinions"] = _raw(fin, "numberOfAnalystOpinions")
-                    if merged.get("earningsQuarterlyGrowth") is None:
-                        merged["earningsQuarterlyGrowth"] = _raw(stats, "earningsQuarterlyGrowth")
-                    if merged.get("trailingEps") is None:
-                        merged["trailingEps"] = _raw(stats, "trailingEps")
-                    if merged.get("forwardEps") is None:
-                        merged["forwardEps"] = _raw(stats, "forwardEps")
-                    if not merged.get("earnings_beat_list"):
-                        quarters = earn_hist.get("history", []) or []
-                        bl = _parse_beat_list(quarters)
-                        if bl:
-                            merged["earnings_beat_list"] = bl
-
-                    if _has_data(merged):
-                        return merged
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        if attempt < 2:
-            time.sleep(2 * (attempt + 1))
-
-    if _has_data(merged):
-        return merged
-
-    raise RuntimeError(f"לא ניתן היה למשוך נתוני יסוד עבור {ticker_symbol} אחרי כל הניסיונות")
-
-@st.cache_data(ttl=600, show_spinner=False)
-def _fetch_fundamentals_cached(ticker_symbol):
-    return _fetch_fundamentals_raw(ticker_symbol)
-
-def fetch_fundamentals(ticker_symbol):
-    try:
-        return _fetch_fundamentals_cached(ticker_symbol)
-    except Exception:
-        try:
-            return _fetch_fundamentals_raw(ticker_symbol)
-        except Exception:
-            return {}
 
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
-        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
+        t = yf.Ticker(clean_ticker)
+        df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
 
         if df.empty or len(df) < 30:
-            try:
-                test_info = yf.Ticker(clean_ticker).fast_info
-                _ = test_info.last_price
-                return {"_error": "network"}
-            except Exception:
-                return {"_error": "invalid"}
+            return {"_error": "invalid"}
 
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
@@ -712,227 +353,113 @@ def analyze_ticker(ticker):
                 if live_price > 0 and live_prev_close > 0:
                     last = live_price
                     prev = live_prev_close
-        except Exception:
+        except:
             pass
 
         chg = round(((last - prev) / prev) * 100, 2)
         rsi = calculate_rsi(close)
         
-        if rsi > 70:
-            rsi_status, rsi_pos = "זמן למכור", False
-        elif rsi < 30:
-            rsi_status, rsi_pos = "זמן לקנות", True
-        else:
-            rsi_status, rsi_pos = "ניטרלי", None
+        rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        ma100_series = close.rolling(100).mean().bfill().fillna(last)
-        ma200_series = close.rolling(200).mean().bfill().fillna(last)
+        ma100_val = float(close.rolling(100).mean().bfill().fillna(last).iloc[-1])
+        ma200_val = float(close.rolling(200).mean().bfill().fillna(last).iloc[-1])
         
-        above_all = True
-        below_all = True
-        for j in range(1, min(4, len(close))):
-            c_val = float(close.iloc[-j])
-            if not (c_val > float(ma100_series.iloc[-j]) and c_val > float(ma200_series.iloc[-j])):
-                above_all = False
-            if not (c_val < float(ma100_series.iloc[-j]) and c_val < float(ma200_series.iloc[-j])):
-                below_all = False
-                
-        if above_all:
-            ma_status, ma_pos = "לונג", True
-        elif below_all:
-            ma_status, ma_pos = "שורט", False
-        else:
-            ma_status, ma_pos = "ניטרלי", None
+        ma_status, ma_pos = ("לונג", True) if (last > ma100_val and last > ma200_val) else ("שורט", False) if (last < ma100_val and last < ma200_val) else ("ניטרלי", None)
 
         info = fetch_fundamentals(clean_ticker)
 
-        earnings_text = "אין נתונים מספיקים להערכה"
-        earnings_badge = "לא זמין"
-        earnings_pos = None
-
-        beat_list = info.get("earnings_beat_list") or []
-        if beat_list:
-            total_q = len(beat_list)
-            beats = sum(1 for b in beat_list if b)
-            earnings_badge = f"{beats}/{total_q}"
-            if beats == total_q:
-                earnings_text = f"המניה עמדה בתחזית האנליסטים או עברה אותה ב-{beats} מתוך {total_q} הרבעונים האחרונים — רצף מושלם"
-                earnings_pos = True
-            elif beats == 0:
-                earnings_text = f"המניה לא עמדה בתחזית האנליסטים באף אחד מ-{total_q} הרבעונים האחרונים"
-                earnings_pos = False
-            elif beats >= total_q / 2:
-                earnings_text = f"המניה עמדה בתחזית האנליסטים או עברה אותה ב-{beats} מתוך {total_q} הרבעונים האחרונים"
-                earnings_pos = True
-            else:
-                earnings_text = f"המניה עמדה בתחזית האנליסטים רק ב-{beats} מתוך {total_q} הרבעונים האחרונים"
-                earnings_pos = False
-
+        # אופציות
         options_text = "אין נתוני אופציות"
         calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
         if total_oi > 0:
             calls_ratio = (calls_oi / total_oi) * 100
-            if calls_ratio >= 50:
-                options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)"
-            else:
-                options_text = f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
+            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
 
+        # דוחות
+        earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
         rev_growth = info.get("revenueGrowth")
+        forecast_text, forecast_pos = ("אין תחזית זמינה", None)
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
-            if rev_growth_pct >= 0:
-                forecast_text = f"צפי לגדילה בהכנסות ב-{rev_growth_pct}%"
-                forecast_pos = True
-            else:
-                forecast_text = f"צפי לירידה בהכנסות ב-{abs(rev_growth_pct)}%"
-                forecast_pos = False
-        else:
-            forecast_text = "אין תחזית הכנסות זמינה"
-            forecast_pos = None
+            forecast_text, forecast_pos = (f"צפי לגדילה ב-{rev_growth_pct}%", True) if rev_growth_pct >= 0 else (f"צפי לירידה ב-{abs(rev_growth_pct)}%", False)
 
+        # המלצות
         rec_key = info.get("recommendationKey")
         num_analysts = info.get("numberOfAnalystOpinions")
-        
+        rec_text, rec_badge, rec_pos = "אין המלצות", "לא זמין", None
         if rec_key and rec_key != "none":
-            hebrew_rec = {
-                "strong_buy": "קנייה חזקה",
-                "buy": "קנייה",
-                "hold": "אחזקה",
-                "sell": "מכירה",
-                "strong_sell": "מכירה חזקה",
-                "underperform": "תשואת חסר",
-                "outperform": "תשואת יתר"
-            }
-            translated_rec = hebrew_rec.get(rec_key, rec_key.replace('_', ' ').title())
-            analyst_text = f"מבוסס על {num_analysts} אנליסטים" if num_analysts else "קונצנזוס"
-            rec_text = f"המלצה: {translated_rec} ({analyst_text})"
+            translated_rec = {"strong_buy":"קנייה חזקה", "buy":"קנייה", "hold":"אחזקה", "sell":"מכירה", "strong_sell":"מכירה חזקה"}.get(rec_key, rec_key.replace('_', ' ').title())
+            rec_text = f"המלצה: {translated_rec} ({num_analysts} אנליסטים)" if num_analysts else f"המלצה: {translated_rec}"
             rec_badge = translated_rec
-            rec_pos = rec_key in ["buy", "strong_buy", "outperform"]
-        else:
-            rec_text = "אין המלצות אנליסטים"
-            rec_badge = "לא זמין"
-            rec_pos = None
+            rec_pos = rec_key in ["buy", "strong_buy"]
 
-        ma9_val = float(close.rolling(9).mean().iloc[-1]) if len(close) >= 9 else last
-        trend_up = last > ma9_val 
-        up = chg >= 0
-        trend_status = "שורי (דומיננטיות קונים ברורה)" if trend_up else "דובי (לחץ מוכרים מוגבר)"
+        trend_status = "שורי (קונים דומיננטיים)" if last > float(close.rolling(9).mean().iloc[-1]) else "דובי (מוכרים דומיננטיים)"
         
-        formatted_opinion = (
-            f"🎯 <b>מסקנה אנליטית:</b> מניית {clean_ticker} נמצאת כעת במבנה מחירים <b>{trend_status}</b> בטווח הקצר המיידי.<br/>"
-            f"📊 <b style='color:#c9a84c;'>מצב המתנדים:</b> מדד ה-RSI עומד על {rsi:.1f} המייצג סביבה תנודתית, כאשר נפח המסחר משקף מעורבות מוסדית.<br/>"
-            f"🌐 <b style='color:#c9a84c;'>טווח ארוך (מאקרו):</b> נכס הבסיס נסחר במגמה של <b>{ma_status}</b> ביחס לממוצעים 100 ו-200 ימים."
-        )
-        
+        # המלצת AI אמיתית (Fix #5)
+        ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
+        if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
+            try:
+                genai.configure(api_key=GEMINI_API_KEY)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים הנעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. המטרה שלך: כתוב בדיוק 2 משפטים בעברית שמסכמים את המצב, וסיים במילה אחת מפורשת בלבד (המלצת מסחר): 'קנייה', 'מכירה', או 'המתנה'."
+                ai_recommendation = model.generate_content(prompt).text.strip()
+            except:
+                ai_recommendation = "שגיאת התחברות לשרתי ה-AI בעת ניתוח המניה."
+
         return {
-            "ticker":   clean_ticker,
-            "price":    f"${last:.2f}",
-            "chg":      f"+{chg}%" if chg >= 0 else f"{chg}%",
-            "up":       up,
-            "rsi_val_num": rsi,
-            "rsi_status": rsi_status,
-            "rsi_pos":    rsi_pos,
-            "ma_status":  ma_status,
-            "ma_pos":     ma_pos,
-            "options_text": options_text,
-            "earnings":   earnings_text,
-            "earnings_badge": earnings_badge,
-            "earnings_pos":   earnings_pos,
-            "rec_text":   rec_text,
-            "rec_badge":  rec_badge,
-            "rec_pos":    rec_pos,
-            "forecast_text": forecast_text,
-            "forecast_pos":  forecast_pos,
-            "momentum":   "עולה" if up else "יורד",
-            "summary_text": formatted_opinion
+            "ticker": clean_ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg >= 0 else f"{chg}%", "up": chg >= 0,
+            "rsi_val_num": rsi, "rsi_status": rsi_status, "rsi_pos": rsi_pos,
+            "ma_status": ma_status, "ma_pos": ma_pos, "options_text": options_text,
+            "earnings": earnings_text, "earnings_badge": earnings_badge, "earnings_pos": earnings_pos,
+            "rec_text": rec_text, "rec_badge": rec_badge, "rec_pos": rec_pos,
+            "forecast_text": forecast_text, "forecast_pos": forecast_pos,
+            "momentum": "עולה" if chg >= 0 else "יורד",
+            "ai_recommendation": ai_recommendation
         }
-    except Exception as e:
+    except:
         return {"_error": "network"}
 
 def render_cards(data, mode):
-    if data is None:
-        return '<div class="empty-msg">הפעל את הרדאר כדי לראות תוצאות</div>'
-    if len(data) == 0:
-        return '<div class="empty-msg">לא נמצאו מניות העונות לקריטריונים כרגע</div>'
-    cls  = "card-long"    if mode == "long" else "card-short"
-    pcls = "card-price-g" if mode == "long" else "card-price-r"
-    cards = "".join(
-        f'<div class="stock-card {cls}">'
-        f'<div class="card-sym">{s["symbol"]}</div>'
-        f'<div class="{pcls}">{s["price"]}</div>'
-        f'<div class="card-chg">{s["chg"]}</div></div>'
-        for s in data
-    )
+    if data is None: return '<div class="empty-msg">הפעל את הרדאר כדי לראות תוצאות</div>'
+    if len(data) == 0: return '<div class="empty-msg">לא נמצאו מניות העונות לקריטריונים כרגע</div>'
+    cls, pcls = ("card-long", "card-price-g") if mode == "long" else ("card-short", "card-price-r")
+    cards = "".join(f'<div class="stock-card {cls}"><div class="card-sym">{s["symbol"]}</div><div class="{pcls}">{s["price"]}</div><div class="card-chg">{s["chg"]}</div></div>' for s in data)
     return f'<div class="card-grid">{cards}</div>'
 
 def render_analysis(d):
-    if not d or not isinstance(d, dict):
-        return ''
-    
-    tag_cls = "tag-green" if d.get("up", True) else "tag-red"
-    chg_color = "#16a34a" if d.get("up") else "#dc2626"
-    
-    rsi_pos = d.get("rsi_pos")
-    ma_pos = d.get("ma_pos")
-    earnings_pos = d.get("earnings_pos")
-    forecast_pos = d.get("forecast_pos")
-    rec_pos = d.get("rec_pos")
+    if not d or not isinstance(d, dict): return ''
+    tag_cls, chg_color = ("tag-green", "#16a34a") if d.get("up", True) else ("tag-red", "#dc2626")
     
     def make_row(label, val_text, badge_text="", is_pos=None):
         badge_html = ""
         if badge_text:
-            if is_pos is True:
-                bg = "rgba(22, 163, 74, 0.15); color: #16a34a;"
-            elif is_pos is False:
-                bg = "rgba(220, 38, 38, 0.15); color: #dc2626;"
-            else:
-                bg = "rgba(255, 255, 255, 0.06); color: #9a8f7a;"
+            bg = "rgba(22, 163, 74, 0.15); color: #16a34a;" if is_pos is True else "rgba(220, 38, 38, 0.15); color: #dc2626;" if is_pos is False else "rgba(255, 255, 255, 0.06); color: #9a8f7a;"
             badge_html = f'<span style="padding: 2px 7px; border-radius: 3px; font-size: 0.68rem; font-weight: 700; margin-right: 8px; background: {bg};">{badge_text}</span>'
-        
-        return (
-            f'<div style="display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); direction: rtl;">'
-            f'<span style="font-size: 0.78rem; color: #7a7060; font-weight: 500;">{label}</span>'
-            f'<div style="display: flex; align-items: center; gap: 4px; direction: ltr; text-align: left;">'
-            f'{badge_html}'
-            f'<span style="font-size: 0.78rem; color: #f0ede6; font-weight: 600; font-family: \'Inter\', sans-serif;">{val_text}</span>'
-            f'</div></div>'
-        )
+        return f'<div style="display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); direction: rtl;"><span style="font-size: 0.78rem; color: #7a7060; font-weight: 500;">{label}</span><div style="display: flex; align-items: center; gap: 4px; direction: ltr; text-align: left;">{badge_html}<span style="font-size: 0.78rem; color: #f0ede6; font-weight: 600; font-family: \'Inter\', sans-serif;">{val_text}</span></div></div>'
 
-    rows_html = (
-        make_row("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), rsi_pos) +
-        make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", ma_pos) +
-        make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) +
-        make_row("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), earnings_pos) +
-        make_row("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", forecast_pos) +
-        make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), rec_pos)
-    )
+    rows_html = make_row("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), d.get("rsi_pos")) + \
+                make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", d.get("ma_pos")) + \
+                make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) + \
+                make_row("צפי נתונים", d.get("forecast_text", ""), "תחזית", d.get("forecast_pos")) + \
+                make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), d.get("rec_pos"))
 
-    html = (
-        f'<div class="result-card" style="border: 1px solid rgba(201,168,76,0.15); background: #11110e; border-radius: 4px; overflow: hidden; margin-top: 15px;">'
-        f'<div style="background: rgba(201,168,76,0.04); padding: 14px 16px; border-bottom: 1px solid rgba(201,168,76,0.15); display: flex; justify-content: space-between; align-items: center; direction: rtl;">'
-        f'<span style="font-size: 0.95rem; font-weight: 700; color: #f0ede6; font-family: \'Playfair Display\', serif;">{d.get("ticker", "")} &nbsp; <span style="font-family: \'Inter\'; color:#c9a84c;">{d.get("price", "")}</span>'
-        f'<small style="color: {chg_color}; font-size: 0.75rem; margin-right: 6px; font-family: \'Inter\'; font-weight:600;">{d.get("chg", "")}</small></span>'
-        f'<span class="result-tag {tag_cls}" style="font-size: 0.65rem; font-weight: 700; padding: 3px 9px; border-radius: 3px;">{d.get("momentum", "")}</span></div>'
-        f'<div style="background: #141410;">{rows_html}</div></div>'
-        f'<div class="ai-response-box" style="margin-top: 14px; padding: 16px; background: rgba(201,168,76,0.04); border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; border-radius: 4px;">'
-        f'<div class="ai-response-label" style="font-size: 0.7rem; font-weight: 700; color: #c9a84c; letter-spacing: 0.05em; margin-bottom: 6px;">📋 ניתוח ומסקנות מודל — THE MIND CHANGER</div>'
-        f'<div class="ai-response-text" style="font-size: 0.82rem; color: #f0ede6; line-height: 1.7; font-weight:400; direction: rtl; text-align: right;">{d.get("summary_text", "")}</div></div>'
-    )
+    html = f'<div class="result-card" style="border: 1px solid rgba(201,168,76,0.15); background: #11110e; border-radius: 4px; overflow: hidden; margin-top: 15px;">' \
+           f'<div style="background: rgba(201,168,76,0.04); padding: 14px 16px; border-bottom: 1px solid rgba(201,168,76,0.15); display: flex; justify-content: space-between; align-items: center; direction: rtl;">' \
+           f'<span style="font-size: 0.95rem; font-weight: 700; color: #f0ede6; font-family: \'Playfair Display\', serif;">{d.get("ticker", "")} &nbsp; <span style="font-family: \'Inter\'; color:#c9a84c;">{d.get("price", "")}</span>' \
+           f'<small style="color: {chg_color}; font-size: 0.75rem; margin-right: 6px; font-family: \'Inter\'; font-weight:600;">{d.get("chg", "")}</small></span>' \
+           f'<span class="result-tag {tag_cls}" style="font-size: 0.65rem; font-weight: 700; padding: 3px 9px; border-radius: 3px;">{d.get("momentum", "")}</span></div>' \
+           f'<div style="background: #141410;">{rows_html}</div></div>' \
+           f'<div class="ai-response-box" style="margin-top: 14px; padding: 16px; background: rgba(201,168,76,0.04); border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; border-radius: 4px;">' \
+           f'<div class="ai-response-label" style="font-size: 0.7rem; font-weight: 700; color: #c9a84c; letter-spacing: 0.05em; margin-bottom: 6px;">🤖 המלצת מערכת בינה מלאכותית</div>' \
+           f'<div class="ai-response-text" style="font-size: 0.82rem; color: #f0ede6; line-height: 1.7; font-weight:400; direction: rtl; text-align: right;">{d.get("ai_recommendation", "")}</div></div>'
     return html
 
 for k in ["long_results", "short_results", "analysis", "ai_answer"]:
-    if k not in st.session_state:
-        st.session_state[k] = None
+    if k not in st.session_state: st.session_state[k] = None
 
-with st.spinner("טוען נתוני שוק..."):
-    quotes  = fetch_quotes()
-    indices = fetch_indices()
-    stocks  = fetch_live_stocks()
-
-quotes_json  = json.dumps(quotes,  ensure_ascii=False)
-indices_json = json.dumps(indices, ensure_ascii=False)
-stocks_json  = json.dumps(stocks,  ensure_ascii=False)
+with st.spinner("טוען נתוני שוק חיים..."):
+    quotes, indices, stocks = fetch_quotes(), fetch_indices(), fetch_live_stocks()
 
 top_html = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -972,7 +499,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 .hero-right{{position:relative;z-index:1}}
 .live-card{{background:#141410;border:1px solid rgba(201,168,76,0.12);border-radius:5px;padding:20px}}
 .live-card-header{{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06)}}
-.live-card-title{{font-family:'Playfair Display',serif;font-size:0.92rem;color:#f0ede6;font-weight:700}}
+.live-card-title{{font-family:'Playfair Display',serif;font-size:0.92rem;color:#f0ede6;font-weight:700; display:flex; justify-content:space-between; width:100%;}}
 .live-dot{{width:6px;height:6px;border-radius:50%;background:#16a34a;animation:blink 1.4s infinite;display:inline-block;margin-left:5px}}
 @keyframes blink{{0%,100%{{opacity:1}}50%{{opacity:.3}}}}
 .live-label{{font-size:0.65rem;font-weight:600;color:#16a34a;letter-spacing:0.08em;display:flex;align-items:center}}
@@ -1000,7 +527,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   <div class="modal">
     <div class="modal-logo">The Mind Changer</div>
     <div class="modal-line"></div>
-    <p>המידע המוצג כאן מיועד למטרות לימוד בלבד ואינו מהווה ייעוץ השקעות. כל החלטת השקעה היא באחריותך הבלעדית.<br><br>בגלל שהאתר בנוי בצורה חינמית, אם לא מצליחים לקבל נתונים, יש לחכות כמה שניות וללחוץ על כפתור החיפוש שנית.</p>
+    <p>המידע המוצג כאן מיועד למטרות לימוד בלבד ואינו מהווה ייעוץ השקעות. כל החלטת השקעה היא באחריותך הבלעדית.</p>
     <button class="modal-btn" onclick="document.getElementById('modal').classList.remove('open')">הבנתי — כניסה</button>
   </div>
 </div>
@@ -1024,7 +551,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   <div class="hero-right">
     <div class="live-card">
       <div class="live-card-header">
-        <div class="live-card-title">שוק בזמן אמת</div>
+        <div class="live-card-title">שוק בזמן אמת <span style="font-size: 0.65rem; color: #7a7060; font-weight: 500; margin-right: 8px;">(עודכן: {st.session_state.last_refresh})</span></div>
         <div class="live-label"><div class="live-dot"></div>&nbsp;LIVE</div>
       </div>
       <div id="indices-rows"><div style="color:#7a7060;font-size:0.78rem;padding:8px 0">טוען מדדים...</div></div>
@@ -1036,9 +563,9 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
   <div class="quote-text">"השוק הוא מכשיר להעברת כסף מהחסר סבלנות אל בעל הסבלנות" <span style="font-size: 0.8em; color: rgba(10,10,8,0.7); font-style: normal; font-weight: 600;">— וורן באפט</span></div>
 </div>
 <script>
-const QUOTES  = {quotes_json};
-const INDICES = {indices_json};
-const STOCKS  = {stocks_json};
+const QUOTES  = {json.dumps(quotes, ensure_ascii=False)};
+const INDICES = {json.dumps(indices, ensure_ascii=False)};
+const STOCKS  = {json.dumps(stocks, ensure_ascii=False)};
 function buildTape() {{
   if (!QUOTES.length) return;
   const full = [...QUOTES, ...QUOTES];
@@ -1085,12 +612,10 @@ with tab_long:
   <div class="panel-title">רדאר לונג</div>
   <div class="panel-sub">סריקת מניות במומנטום עולה</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית, רחוקה לפחות מ-8% מתחת לשיא כל הזמנים</li>
+    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-green"></div>מבנה נרות: היום ואתמול ירוקים, סגירה גבוהה יותר ותבנית פטיש גמישה</li>
-    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חיתוך ביניים (לא מתחת לכולם יחד, ולא מעל כולם)</li>
-    <li><div class="crit-dot dot-green"></div>איזון נגזרים: נטיית Calls</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל 9, 100 ו-200 במקביל.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -1104,10 +629,8 @@ with tab_long:
             stop_long = st.button("עצור 🛑", key="stop_long_trigger")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        if stop_long:
-            st.stop()
-        if run_long:
-            st.session_state.long_results = do_scan("long")
+        if stop_long: st.stop()
+        if run_long: st.session_state.long_results = do_scan("long")
             
     with col2:
         long_count = f"{len(st.session_state.long_results)} מניות" if st.session_state.long_results is not None else "—"
@@ -1135,15 +658,12 @@ with tab_long:
             if stop_deep_l:
                 st.stop()
             if run_deep_l:
-                with st.spinner("מבצע סינון עומק מחזורי ומוודא תבנית פטיש קשיחה..."):
+                with st.spinner("מבצע סינון עומק מחזורי..."):
                     deep_filtered = []
-                    session = get_session()
                     for item in st.session_state.long_results:
-                        if not item.get("strict_hammer", False):
-                            continue
                         try:
                             ticker_sym = item["symbol"]
-                            ticker_obj = yf.Ticker(ticker_sym, session=session)
+                            ticker_obj = yf.Ticker(ticker_sym)
                             hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                             hist = hist.dropna(subset=["Volume"])
                             if len(hist) >= 20:
@@ -1167,8 +687,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: 3 ימים יורדים ברצף או כוכב נופל אדום ולאחריו נר אדום נמוך יותר</li>
-    <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): מוודא נפח עולה ויותר Puts מ-Calls</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: שני ימי מסחר רצופים של סגירות שליליות</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -1182,10 +701,8 @@ with tab_short:
             stop_short = st.button("עצור 🛑", key="stop_short_trigger")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        if stop_short:
-            st.stop()
-        if run_short:
-            st.session_state.short_results = do_scan("short")
+        if stop_short: st.stop()
+        if run_short: st.session_state.short_results = do_scan("short")
             
     with col2:
         short_count = f"{len(st.session_state.short_results)} מניות" if st.session_state.short_results is not None else "—"
@@ -1215,16 +732,14 @@ with tab_short:
             if run_deep_s:
                 with st.spinner("מבצע סינון עומק מחזורי ובודק יחס אופציות (Puts > Calls)..."):
                     deep_filtered_short = []
-                    session = get_session()
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
                             
-                            # סינון חדש: בודק יחס אופציות (פוטים גדול מקולים)
                             calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
                             
                             if puts_oi > calls_oi:
-                                ticker_obj = yf.Ticker(ticker_sym, session=session)
+                                ticker_obj = yf.Ticker(ticker_sym)
                                 hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                                 hist = hist.dropna(subset=["Volume"])
                                 if len(hist) >= 20:
@@ -1243,104 +758,54 @@ with tab_ai:
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:10px;">
   <div class="panel-title">ניתוח מניה בודדת</div>
-  <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי</div>
+  <div class="panel-sub">הזן סימול וקבל ניתוח טכני אמיתי (הקלד ולחץ Enter)</div>
 </div>""", unsafe_allow_html=True)
-        ticker_val = st.text_input("סימול מניה", placeholder="AAPL, TSLA, NVDA...", label_visibility="collapsed")
         
-        btn_col1, btn_col2 = st.columns([3, 1])
-        with btn_col1:
-            st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
-            run_ai = st.button("נתח מניה", key="analyze_trigger")
-            st.markdown('</div>', unsafe_allow_html=True)
-        with btn_col2:
-            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
-            stop_ai = st.button("עצור 🛑", key="stop_ai_trigger")
-            st.markdown('</div>', unsafe_allow_html=True)
+        with st.form("single_stock_form"):
+            ticker_val = st.text_input("סימול מניה", placeholder="AAPL, TSLA, NVDA...", label_visibility="collapsed")
+            run_ai = st.form_submit_button("נתח מניה")
 
-        if stop_ai:
-            st.stop()
-        if run_ai:
-            if ticker_val:
-                ticker_clean = ticker_val.upper().strip()
-                with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
-                    res = analyze_ticker(ticker_clean)
-
-                    retry_count = 0
-                    while isinstance(res, dict) and res.get("_error") == "network" and retry_count < 2:
-                        time.sleep(2)
-                        res = analyze_ticker(ticker_clean)
-                        retry_count += 1
-
-                    if res and not (isinstance(res, dict) and "_error" in res):
-                        st.session_state.analysis = res
-                    else:
-                        st.session_state.analysis = None
-                        if isinstance(res, dict) and res.get("_error") == "invalid":
-                            st.error(f"הסימול '{ticker_clean}' לא נמצא. ודא שכתבת אותו נכון (לדוגמה: AAPL, TSLA, BRK-B).")
-                        else:
-                            st.error("יאהו פיננס עמוס כרגע ולא הצליח להחזיר נתונים אחרי כמה ניסיונות. המתן רגע ולחץ שוב על 'נתח מניה'.")
+        if run_ai and ticker_val:
+            ticker_clean = ticker_val.upper().strip()
+            with st.spinner(f"מחלץ נתוני שוק חיים עבור {ticker_clean}..."):
+                res = analyze_ticker(ticker_clean)
+                if res and not (isinstance(res, dict) and "_error" in res):
+                    st.session_state.analysis = res
+                else:
+                    st.session_state.analysis = None
+                    st.error("לא הצלחנו לאתר את המניה או שהבורסה חסמה את הבקשה. נסה שנית בעוד רגע.")
                         
         if st.session_state.analysis:
-            analysis_html = render_analysis(st.session_state.analysis)
-            st.markdown(analysis_html, unsafe_allow_html=True)
+            st.markdown(render_analysis(st.session_state.analysis), unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0; padding-bottom:10px;">
   <div class="panel-title">שאלות כלליות</div>
-  <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים</div>
+  <div class="panel-sub">שאל שאלות פיננסיות וקבל הסברים (הקלד ולחץ Enter)</div>
 </div>""", unsafe_allow_html=True)
-        qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="כמה כסף זה ב-3 שנים אם אני משקיע...", label_visibility="collapsed")
         
-        btn_col1, btn_col2 = st.columns([3, 1])
-        with btn_col1:
-            st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
-            run_qa = st.button("שאל", key="qa_trigger")
-            st.markdown('</div>', unsafe_allow_html=True)
-        with btn_col2:
-            st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
-            stop_qa = st.button("עצור 🛑", key="stop_qa_trigger")
-            st.markdown('</div>', unsafe_allow_html=True)
+        with st.form("qa_form"):
+            qa_val = st.text_input("שאלה לגבי אינדיקטורים", placeholder="כמה כסף זה ב-3 שנים אם אני משקיע...", label_visibility="collapsed")
+            run_qa = st.form_submit_button("שאל")
 
-        if stop_qa:
-            st.stop()
-        if run_qa:
-            if qa_val:
-                q = qa_val.strip()
-                
-                if not GENAI_AVAILABLE or GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
-                    st.session_state.ai_answer = (
-                        "<b>⚠️ חיבור חסר למערכת ה-AI:</b><br/><br/>"
-                        "כדי שהמערכת תוכל לתקשר עם ה-API של גוגל ולענות על שאלות חופשיות, עליך להדביק את מפתח ה-API החוקי שלך בהגדרות הסודות של השרת.<br/><br/>"
-                        "<i>(עד אז, המערכת תספק תשובות בסיסיות רק למונחים כמו RSI, שורט או ממוצעים).</i>"
-                    )
-                else:
-                    with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
-                        try:
-                            genai.configure(api_key=GEMINI_API_KEY)
-                            
-                            available_models = []
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    available_models.append(m.name)
-                                    
-                            if not available_models:
-                                st.session_state.ai_answer = "<b>שגיאה:</b> המפתח שסיפקת תקין, אך אין לו הרשאות למודלי יצירת טקסט של Gemini ב-Google Cloud."
-                            else:
-                                chosen_model = available_models[0]
-                                for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']:
-                                    if preferred in available_models:
-                                        chosen_model = preferred
-                                        break
-                                        
-                                model = genai.GenerativeModel(chosen_model)
-                                prompt_text = f"אתה מומחה פיננסי בכיר במערכת 'The Mind Changer'. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה של המשתמש: {q}"
-                                response = model.generate_content(prompt_text)
-                                st.session_state.ai_answer = response.text
-                                
-                        except Exception as e:
-                            st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
-                            
+        if run_qa and qa_val:
+            q = qa_val.strip()
+            if not GENAI_AVAILABLE or GEMINI_API_KEY == "הכנס_כאן_את_המפתח_החדש":
+                st.session_state.ai_answer = "<b>⚠️ חיבור חסר למערכת ה-AI. יש להזין מפתח API מורשה בהגדרות הסודות.</b>"
+            else:
+                with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
+                    try:
+                        genai.configure(api_key=GEMINI_API_KEY)
+                        # מעודכן למודל חזק יותר, יחד עם נתוני התאריך הנוכחיים לבסיס ידע מעודכן
+                        model = genai.GenerativeModel('gemini-1.5-pro')
+                        current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        prompt_text = f"התאריך והשעה כעת הם {current_date}. אתה מומחה פיננסי מערכת 'The Mind Changer'. השתמש במידע העדכני ביותר שיש לך וציין במידת הצורך אם משהו חסר. ענה על השאלה הבאה בצורה מקצועית, ברורה, מדויקת, ובשפה העברית (עד 3-4 פסקאות).\n\nהשאלה: {q}"
+                        response = model.generate_content(prompt_text)
+                        st.session_state.ai_answer = response.text
+                    except Exception as e:
+                        st.session_state.ai_answer = f"<b>שגיאה בתקשורת עם שרתי גוגל:</b> {str(e)}"
+                        
         if st.session_state.ai_answer:
             st.markdown(f"""
 <div class="ai-response-box" style="margin-top:12px; min-height: 160px; border: 1px solid rgba(201,168,76,0.15); border-right: 4px solid #c9a84c; background: #11110e;">
@@ -1384,13 +849,13 @@ with tab_fear_greed:
         html_text = """<div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 25px; margin-top: 15px; direction: rtl; text-align: right; min-height: 380px;">
 <h3 style="font-family: 'Playfair Display', serif; color: #f0ede6; font-size: 1.15rem; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">מזה מדד הפחד והגרידיות ומה הוא מראה?</h3>
 <p style="font-size: 0.85rem; color: #9a8f7a; line-height: 1.7; margin-bottom: 14px;">
-מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט. המדד נע בסולם שבין <b>0 ל-100</b> ומבוסס על שקלול של 7 אינדיקטורים שונים, ביניהם: מומנטום המחירים בשוק, עוצמת מחירי המניות, יחס חוזי אופציות ה-Put/Call, תנודתיות השוק (מדד ה-VIX) והביקוש לאגרות חוב בטוחות.
+מדד הפחד והגרידיות (Fear & Greed Index) שפותח על ידי רשת <b>CNN Business</b> משמש כלי מרכזי לניתוח סנטימנט השוק ואיתור מצבי קיצון פסיכולוגיים בקרב המשקיעים בוול סטריט.
 </p>
 <h4 style="color: #c9a84c; font-size: 0.9rem; margin-bottom: 6px;">כיצד מפרשים את נתוני המדד במסחר?</h4>
 <ul style="list-style: none; padding-right: 0; font-size: 0.82rem; color: #7a7060; line-height: 1.6;">
-<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים בשוק. סוחרים מנוסים רואים במצב זה פוטנציאל גבוה להיווצרות תחתית בגרף והזדמנות קניות יוצאת דופן במחירי רצפה (כפי שאמר באפט: "היה גרידי כשאחרים מפחדים").</li>
-<li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב בתוך תעלות ומגמות מאוזנות ללא אופוריה או פחד חריג.</li>
-<li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת, כניסת קונים אגרסיבית (FOMO) ומתיחת יתר של המחירים בשוק. מצב זה מזהיר מפני בועה מקומית ופוטנציאל גבוה לתיקון אלים או קריסה קרובה כלפי מטה.</li>
+<li style="margin-bottom: 8px;"><b style="color: #dc2626;">• פחד קיצוני (0-25):</b> מעיד על פאניקה מסיבית ומימושים כבדים. סוחרים מנוסים רואים במצב זה פוטנציאל להיווצרות תחתית.</li>
+<li style="margin-bottom: 8px;"><b style="color: #9a8f7a;">• מצב ניטרלי (45-55):</b> משקף שיווי משקל בריא, מסחר יציב ללא אופוריה או פחד חריג.</li>
+<li style="margin-bottom: 8px;"><b style="color: #16a34a;">• גרידיות קיצונית (75-100):</b> מאותת על אופוריה מוגזמת וכניסת קונים אגרסיבית. מזהיר מפני תיקון אלים כלפי מטה.</li>
 </ul>
 </div>"""
         st.markdown(html_text, unsafe_allow_html=True)
@@ -1399,7 +864,7 @@ with tab_market_dir:
     st.markdown("""
 <div class="panel-card" style="margin-top:15px; border-bottom-left-radius:0; border-bottom-right-radius:0;">
   <div class="panel-title">התמונה הגדולה: מדד ה-QQQ</div>
-  <div class="panel-sub">סריקה וניתוח משולב של מדד הנאסד"ק לאיתור מגמת השוק וסינון עסקאות</div>
+  <div class="panel-sub">סריקה וניתוח משולב מבוסס מערכת ניקוד חכמה כדי להכריע את כיוון השוק בצורה ברורה.</div>
 </div>""", unsafe_allow_html=True)
     
     btn_col1, btn_col2 = st.columns([3, 1])
@@ -1412,101 +877,49 @@ with tab_market_dir:
         stop_qqq = st.button("עצור 🛑", key="stop_qqq_btn")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    if stop_qqq:
-        st.stop()
+    if stop_qqq: st.stop()
         
     if run_qqq:
-        with st.spinner("סורק נתונים חיים מהבורסה... (אופציות, מתנדים ומחיר)"):
+        with st.spinner("סורק נתונים חיים ומחשב ניקוד שוק משוקלל..."):
             try:
-                session = get_session()
-                qqq = yf.Ticker("QQQ", session=session)
-                
-                try:
-                    df = qqq.history(period="2y", interval="1d", auto_adjust=True)
-                except:
-                    df = pd.DataFrame()
-                
-                if df.empty:
-                    try:
-                        df = yf.download("QQQ", period="2y", interval="1d", progress=False)
-                    except:
-                        pass
-                
-                if not df.empty and isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                    
-                if df.empty or "Close" not in df.columns:
-                    st.error("הבורסה חסמה זמנית את הבקשות לגרפים (Rate Limit). המתן כמה דקות ונסה שוב.")
-                    st.stop()
-                    
+                qqq = yf.Ticker("QQQ")
+                df = qqq.history(period="1y", interval="1d", auto_adjust=True)
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 
                 calls_oi, puts_oi = fetch_options_sentiment("QQQ")
                 
-                total_oi = calls_oi + puts_oi
-                if total_oi > 0:
-                    call_pct = (calls_oi / total_oi * 100)
-                    put_pct = (puts_oi / total_oi * 100)
-                    opt_status = "קולים" if call_pct > put_pct else "פוטים"
-                else:
-                    call_pct, put_pct = 50.0, 50.0
-                    opt_status = "לא זמין"
+                market_score = 0
+                
+                opt_status = "לא זמין"
+                call_pct, put_pct = 50.0, 50.0
+                if calls_oi + puts_oi > 0:
+                    call_pct = (calls_oi / (calls_oi + puts_oi)) * 100
+                    put_pct = (puts_oi / (calls_oi + puts_oi)) * 100
+                    if call_pct > put_pct:
+                        opt_status = "קולים"
+                        market_score += 1
+                    else:
+                        opt_status = "פוטים"
+                        market_score -= 1
                 
                 rsi_val = calculate_rsi(df['Close'])
-                if rsi_val > 70:
-                    rsi_status = "קניית יתר"
-                elif rsi_val < 30:
-                    rsi_status = "מכירת יתר"
-                else:
-                    rsi_status = "ניטרלי"
+                rsi_status = "קניית יתר" if rsi_val > 70 else "מכירת יתר" if rsi_val < 30 else "ניטרלי"
+                if rsi_val > 55: market_score -= 1
+                elif rsi_val < 45: market_score += 1
                     
-                if len(df) >= 200:
-                    c1, c2, c3 = float(df['Close'].iloc[-1]), float(df['Close'].iloc[-2]), float(df['Close'].iloc[-3])
-                    o1, o2, o3 = float(df['Open'].iloc[-1]), float(df['Open'].iloc[-2]), float(df['Open'].iloc[-3])
-                    h2, l2 = float(df['High'].iloc[-2]), float(df['Low'].iloc[-2])
-                    
-                    g1, g2, g3 = (c1 > o1), (c2 > o2), (c3 > o3)
-                    r1, r2, r3 = (c1 < o1), (c2 < o2), (c3 < o3)
-                    
-                    body_2 = abs(c2 - o2)
-                    lower_shadow_2 = min(o2, c2) - l2
-                    upper_shadow_2 = h2 - max(o2, c2)
-                    
-                    is_hammer_yesterday = (body_2 > 0) and (lower_shadow_2 >= 2 * body_2) and (upper_shadow_2 <= body_2)
-                    is_shooting_star_yesterday = (body_2 > 0) and (upper_shadow_2 >= 2 * body_2) and (lower_shadow_2 <= body_2)
-                    
-                    is_red_hammer_or_star = r2 and (is_hammer_yesterday or is_shooting_star_yesterday)
-                    
-                    is_long = (g1 and g2 and g3) or (g1 and g2 and c1 > c2) or (g1 and is_hammer_yesterday)
-                    is_short = (r1 and r2 and r3) or (r1 and r2 and c1 < c2) or (r1 and is_red_hammer_or_star)
-                    
-                    if is_long:
-                        pa_status = "לונג"
-                    elif is_short:
-                        pa_status = "שורט"
-                    else:
-                        pa_status = "מעורב"
+                c1, c2 = float(df['Close'].iloc[-1]), float(df['Close'].iloc[-2])
+                pa_status = "לונג" if c1 > c2 else "שורט"
+                market_score += 1 if pa_status == "לונג" else -1
                         
-                    ma9 = float(df['Close'].rolling(9).mean().iloc[-1])
-                    ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
-                    ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
+                ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
+                ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
+                ma_status = "לונג" if c1 > ma100 and c1 > ma200 else "שורט" if c1 < ma100 and c1 < ma200 else "מעורב"
+                if ma_status == "לונג": market_score += 1
+                elif ma_status == "שורט": market_score -= 1
                     
-                    if r1 and r2 and (c1 < ma100 or c1 < ma200):
-                        ma_status = "שורט"
-                    elif g1 and g2 and (c1 > ma9):
-                        ma_status = "לונג"
-                    else:
-                        ma_status = "מעורב"
-                else:
-                    pa_status = "חסר נתונים"
-                    ma_status = "חסר נתונים"
-                    
-                if opt_status == "קולים" and rsi_status in ["מכירת יתר", "ניטרלי"] and pa_status == "לונג" and ma_status == "לונג":
-                    verdict = "לונג"
-                elif opt_status == "פוטים" and rsi_status in ["קניית יתר", "ניטרלי"] and pa_status == "שורט" and ma_status == "שורט":
-                    verdict = "שורט"
-                else:
-                    verdict = "מעורב"
+                if market_score >= 1: verdict = "לונג"
+                elif market_score <= -1: verdict = "שורט"
+                else: verdict = "מעורב"
                     
                 st.markdown(f"""
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; direction: rtl;">
@@ -1523,43 +936,25 @@ with tab_market_dir:
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
                         <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
-                        <div style="font-size: 0.75rem; color: #7a7060;">מבנה ב-3 הימים האחרונים (כולל זיהוי פטישים)</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">הסגירה היומית מול הסגירה אתמול</div>
                     </div>
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
-                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים נעים</div>
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">4. ממוצעים ארוכים</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{ma_status}</div>
-                        <div style="font-size: 0.75rem; color: #7a7060;">תמיכות והתנגדויות</div>
+                        <div style="font-size: 0.75rem; color: #7a7060;">ביחס לממוצעים 100 ו-200 ימים</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 if verdict == "לונג":
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);">
-                        <div style="font-size: 4rem; margin-bottom: 10px;">🚀 🟢</div>
-                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 20px rgba(22,163,74,0.4); letter-spacing: 0.05em;">השוק לונג</div>
-                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על מומנטום חיובי ושליטת קונים בנאסד"ק. חפש הזדמנויות לונג.</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("""<div style="background: linear-gradient(135deg, rgba(22,163,74,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #16a34a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(22,163,74,0.15);"><div style="font-size: 4rem; margin-bottom: 10px;">🚀 🟢</div><div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #16a34a; text-shadow: 0 0 20px rgba(22,163,74,0.4); letter-spacing: 0.05em;">השוק לונג</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים והניקוד המצטבר מצביעים על מומנטום חיובי ושליטת קונים.</div></div>""", unsafe_allow_html=True)
                 elif verdict == "שורט":
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, rgba(220,38,38,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #dc2626; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(220,38,38,0.15);">
-                        <div style="font-size: 4rem; margin-bottom: 10px;">🩸 🔴</div>
-                        <div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 20px rgba(220,38,38,0.4); letter-spacing: 0.05em;">השוק בשורט</div>
-                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים מצביעים על חולשה מהותית ושליטת מוכרים בנאסד"ק. חפש הזדמנויות שורט.</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("""<div style="background: linear-gradient(135deg, rgba(220,38,38,0.12) 0%, rgba(10,10,8,1) 100%); border: 1px solid #dc2626; padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px; box-shadow: 0 0 40px rgba(220,38,38,0.15);"><div style="font-size: 4rem; margin-bottom: 10px;">🩸 🔴</div><div style="font-size: 3.5rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #dc2626; text-shadow: 0 0 20px rgba(220,38,38,0.4); letter-spacing: 0.05em;">השוק בשורט</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">התנאים והניקוד המצטבר מצביעים על חולשה מהותית ושליטת מוכרים.</div></div>""", unsafe_allow_html=True)
                 else:
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, rgba(201,168,76,0.05) 0%, rgba(10,10,8,1) 100%); border: 1px solid rgba(201,168,76,0.3); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px;">
-                        <div style="font-size: 3rem; margin-bottom: 10px;">⚖️</div>
-                        <div style="font-size: 2.2rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #c9a84c; letter-spacing: 0.05em;">מגמה מעורבת</div>
-                        <div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">אין כרגע איתות מובהק וחד משמעי לכיוון השוק. מומלץ להמתין למבנה ברור יותר.</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("""<div style="background: linear-gradient(135deg, rgba(201,168,76,0.05) 0%, rgba(10,10,8,1) 100%); border: 1px solid rgba(201,168,76,0.3); padding: 40px; text-align: center; border-radius: 8px; margin-top: 15px;"><div style="font-size: 3rem; margin-bottom: 10px;">⚖️</div><div style="font-size: 2.2rem; font-family: 'Playfair Display', serif; font-weight: 900; color: #c9a84c; letter-spacing: 0.05em;">מגמה מעורבת לחלוטין</div><div style="font-size: 0.9rem; color: #9a8f7a; margin-top: 10px;">הכוחות בשוק מאזנים לחלוטין זה את זה. המתנה להכרעה ברורה.</div></div>""", unsafe_allow_html=True)
                     
             except Exception as e:
-                st.error(f"אירעה שגיאה. ייתכן שאין מספיק נתונים זמינים מהבורסה כרגע. פירוט למפתח: {str(e)}")
+                st.error(f"שגיאת תקשורת נתונים מול הבורסה. נסה שוב. פירוט למפתח: {str(e)}")
 
 bottom_html = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
