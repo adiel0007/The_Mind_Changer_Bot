@@ -282,7 +282,6 @@ def do_scan(mode):
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
-            # בדיקת מינימום 200 ימי מסחר כדי שממוצעי ה-100 ו-200 יהיו מדויקים ולא יזייפו
             if df.empty or len(df) < 200:
                 continue
                 
@@ -295,9 +294,10 @@ def do_scan(mode):
             prev  = float(close.iloc[-2])
             rsi   = calculate_rsi(close)
             
-            ma9   = float(close.rolling(9).mean().iloc[-1])
-            ma100 = float(close.rolling(100).mean().iloc[-1])
-            ma200 = float(close.rolling(200).mean().iloc[-1])
+            # עברנו לחישוב EMA (אקספוננציאלי) שיסונכרן עם הגרפים המקצועיים
+            ema9   = float(close.ewm(span=9, adjust=False).mean().iloc[-1])
+            ema100 = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+            ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
             
             vol_today = int(df["Volume"].iloc[-1])
             vol_yest = int(df["Volume"].iloc[-2])
@@ -310,25 +310,25 @@ def do_scan(mode):
             open_3, close_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3])
             
             if mode == "long":
-                # בדיקה שהמניה רחוקה מלהיות מתוחה מדי כלפי מטה או מעלה
-                overextended = (last > ma9) and (last > ma100) and (last > ma200)
-                crashing = (last < ma9) and (last < ma100) and (last < ma200)
+                ath = float(df["High"].max())
+                not_at_ath_long = last < (ath * 0.92)
                 
-                if (last > ma9 and rsi < 70 and vol > 300_000 
+                # חסימות אבסולוטיות
+                overextended = (last > ema9) and (last > ema100) and (last > ema200)
+                below_majors = (last < ema100) and (last < ema200)  # חסימה של כל מניה שמתחת ל-100 ו-200 במקביל
+                
+                if (rsi < 70 and vol > 300_000 
                     and not overextended 
-                    and not crashing 
+                    and not below_majors 
                     and close_1 > open_1 
-                    and last > prev):
+                    and last > prev
+                    and not_at_ath_long):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                # אכיפה הרמטית של סורק שורט: נרות חייבים להיות *אדומים* טהורים וגם נמוכים מקודמיהם
-                is_red_1 = close_1 < open_1
-                is_red_2 = close_2 < open_2
-                is_red_3 = close_3 < open_3
+                # אכיפת ירידות: חובה ששני הימים יסגרו נמוך יותר
+                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
                 
-                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
-                
-                if (rsi > 30 and vol > 300_000 and three_consecutive_down_and_red):
+                if (rsi > 30 and vol > 300_000 and two_consecutive_negative_closes):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -374,9 +374,10 @@ def analyze_ticker(ticker):
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
         if len(df) >= 200:
-            ma100_val = float(close.rolling(100).mean().iloc[-1])
-            ma200_val = float(close.rolling(200).mean().iloc[-1])
-            ma_status, ma_pos = ("לונג", True) if (last > ma100_val and last > ma200_val) else ("שורט", False) if (last < ma100_val and last < ma200_val) else ("ניטרלי", None)
+            # ממוצעים אקספוננציאליים (EMA) לדיוק מלא
+            ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+            ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+            ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
         else:
             ma_status, ma_pos = ("חסר נתונים", None)
 
@@ -407,8 +408,6 @@ def analyze_ticker(ticker):
             rec_text = f"המלצה: {translated_rec} ({num_analysts} אנליסטים)" if num_analysts else f"המלצה: {translated_rec}"
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
-
-        trend_status = "שורי (קונים דומיננטיים)" if last > float(close.rolling(9).mean().iloc[-1]) else "דובי (מוכרים דומיננטיים)"
         
         # המלצת AI
         ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
@@ -626,11 +625,11 @@ with tab_long:
   <div class="panel-title">רדאר לונג</div>
   <div class="panel-sub">סריקת מניות במומנטום עולה</div>
   <ul class="criteria-list">
-    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית</li>
+    <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית, רחוקה לפחות מ-8% מתחת לשיא כל הזמנים</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל 9, 100 ו-200 במקביל.</li>
-    <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-9, 100 ו-200 בו זמנית. (נדרש מינימום 200 ימי מסחר קיימים)</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל EMA 9, 100 ו-200 במקביל.</li>
+    <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-EMA 100 ו-200 בו זמנית. (נדרש מינימום 200 ימי מסחר קיימים)</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -658,38 +657,6 @@ with tab_long:
   </div>
   {long_cards}
 </div>""", unsafe_allow_html=True)
-        
-        if st.session_state.long_results:
-            f_col1, f_col2 = st.columns([3, 1])
-            with f_col1:
-                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
-                run_deep_l = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_trigger")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with f_col2:
-                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
-                stop_deep_l = st.button("עצור 🛑", key="stop_deep_l_trigger")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            if stop_deep_l:
-                st.stop()
-            if run_deep_l:
-                with st.spinner("מבצע סינון עומק מחזורי..."):
-                    deep_filtered = []
-                    for item in st.session_state.long_results:
-                        try:
-                            ticker_sym = item["symbol"]
-                            ticker_obj = yf.Ticker(ticker_sym)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
-                            hist = hist.dropna(subset=["Volume"])
-                            if len(hist) >= 20:
-                                avg_vol_3d = hist["Volume"].iloc[-3:].mean()
-                                avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
-                                if avg_vol_3d > avg_vol_20d:
-                                    deep_filtered.append(item)
-                        except:
-                            pass
-                    st.session_state.long_results = deep_filtered
-                    st.rerun()
 
 with tab_short:
     col1, col2 = st.columns([1, 2])
@@ -702,7 +669,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: שני ימי מסחר רצופים של סגירות שליליות</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -730,40 +697,6 @@ with tab_short:
   </div>
   {short_cards}
 </div>""", unsafe_allow_html=True)
-        
-        if st.session_state.short_results:
-            f_col1, f_col2 = st.columns([3, 1])
-            with f_col1:
-                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
-                run_deep_s = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_short_trigger")
-                st.markdown('</div>', unsafe_allow_html=True)
-            with f_col2:
-                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
-                stop_deep_s = st.button("עצור 🛑", key="stop_deep_s_trigger")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            if stop_deep_s:
-                st.stop()
-            if run_deep_s:
-                with st.spinner("מבצע סינון עומק מחזורי ובודק יחס אופציות (Puts > Calls)..."):
-                    deep_filtered_short = []
-                    for item in st.session_state.short_results:
-                        try:
-                            ticker_sym = item["symbol"]
-                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
-                            if puts_oi > calls_oi:
-                                ticker_obj = yf.Ticker(ticker_sym)
-                                hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
-                                hist = hist.dropna(subset=["Volume"])
-                                if len(hist) >= 20:
-                                    avg_vol_3d = hist["Volume"].iloc[-3:].mean()
-                                    avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
-                                    if avg_vol_3d > avg_vol_20d:
-                                        deep_filtered_short.append(item)
-                        except:
-                            pass
-                    st.session_state.short_results = deep_filtered_short
-                    st.rerun()
 
 with tab_ai:
     col1, col2 = st.columns([1, 1])
@@ -931,8 +864,8 @@ with tab_market_dir:
                 pa_status = "לונג" if c1 > c2 else "שורט"
                 market_score += 1 if pa_status == "לונג" else -1
                         
-                ma100 = float(df['Close'].rolling(100).mean().iloc[-1])
-                ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
+                ma100 = float(df['Close'].ewm(span=100, adjust=False).mean().iloc[-1])
+                ma200 = float(df['Close'].ewm(span=200, adjust=False).mean().iloc[-1])
                 ma_status = "לונג" if c1 > ma100 and c1 > ma200 else "שורט" if c1 < ma100 and c1 < ma200 else "מעורב"
                 if ma_status == "לונג": market_score += 1
                 elif ma_status == "שורט": market_score -= 1
