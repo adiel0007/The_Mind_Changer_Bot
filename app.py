@@ -254,76 +254,40 @@ def get_fear_greed_data():
     return 55, "ניטרלי 😐"
 
 # =========================================================================
-# פונקציית חילוץ אופציות אולטימטיבית (עוקפת חסימות Rate Limits/401 של Yahoo)
+# פונקציית אופציות אולטימטיבית (Bypass API)
 # =========================================================================
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive"
-    }
-    
-    # שכבה 1: API סודי של יאהו ע"י קבלת Crumb קודם לכן (עוקף חסימה יעיל מאוד)
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+
+    # שכבה 1: API ישיר של Yahoo ללא צורך בספריות מתווכות
     try:
-        session = requests.Session()
-        session.headers.update(headers)
-        
-        session.get("https://fc.yahoo.com", allow_redirects=True, timeout=5)
-        crumb_res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=5)
-        crumb = crumb_res.text.strip()
-        
-        if crumb:
-            url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?crumb={crumb}"
-            res = session.get(url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                result = data.get("optionChain", {}).get("result", [])
-                if result:
-                    expirations = result[0].get("expirationDates", [])
-                    for exp in expirations[:2]:
-                        exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}&crumb={crumb}"
-                        exp_res = session.get(exp_url, timeout=5)
-                        if exp_res.status_code == 200:
-                            exp_data = exp_res.json()
-                            options_chain = exp_data.get("optionChain", {}).get("result", [])
-                            if options_chain:
-                                chain = options_chain[0].get("options", [])
-                                if chain:
-                                    for c in chain[0].get("calls", []): calls_oi += c.get("openInterest", 0)
-                                    for p in chain[0].get("puts", []): puts_oi += p.get("openInterest", 0)
-                    
-                    if calls_oi > 0 or puts_oi > 0:
-                        return calls_oi, puts_oi
+        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            result = data.get("optionChain", {}).get("result", [])
+            if result:
+                expirations = result[0].get("expirationDates", [])
+                for exp in expirations[:2]:
+                    exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
+                    exp_res = requests.get(exp_url, headers=headers, timeout=5)
+                    if exp_res.status_code == 200:
+                        exp_data = exp_res.json()
+                        chain = exp_data.get("optionChain", {}).get("result", [])
+                        if chain:
+                            options = chain[0].get("options", [])
+                            if options:
+                                for c in options[0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
+                                for p in options[0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
+                if calls_oi > 0 or puts_oi > 0:
+                    return calls_oi, puts_oi
     except:
         pass
 
-    # שכבה 2: ספריית yfinance עם סשן חי
-    try:
-        session = requests.Session()
-        session.headers.update(headers)
-        t = yf.Ticker(ticker_clean, session=session)
-        dates = t.options
-        if dates:
-            for date in dates[:2]:
-                try:
-                    chain = t.option_chain(date)
-                    if 'openInterest' in chain.calls.columns:
-                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                    if 'openInterest' in chain.puts.columns:
-                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
-                except:
-                    continue
-            if calls_oi > 0 or puts_oi > 0:
-                return calls_oi, puts_oi
-    except:
-        pass
-        
-    # שכבה 3: yfinance טהור (גיבוי אחרון)
+    # שכבה 2: גיבוי למקרה שה-API הישיר חסום
     try:
         t = yf.Ticker(ticker_clean)
         dates = t.options
@@ -342,14 +306,53 @@ def fetch_options_sentiment(ticker_symbol):
 
     return calls_oi, puts_oi
 
+# =========================================================================
+# פונקציית נתוני יסוד (דוחות ואנליסטים) אולטימטיבית
+# =========================================================================
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_fundamentals(ticker_symbol):
+    ticker_clean = ticker_symbol.strip().upper()
+    info = {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+
+    # שכבה 1: שליפה ישירה ממאגר הנתונים הסודי של יאהו
     try:
-        t = yf.Ticker(ticker_symbol)
-        info = t.info or {}
-        return info
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=financialData,defaultKeyStatistics,earningsHistory"
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json().get("quoteSummary", {}).get("result", [])
+            if data:
+                res_data = data[0]
+                
+                fin = res_data.get("financialData", {})
+                info["revenueGrowth"] = fin.get("revenueGrowth", {}).get("raw")
+                info["recommendationKey"] = fin.get("recommendationKey")
+                info["numberOfAnalystOpinions"] = fin.get("numberOfAnalystOpinions", {}).get("raw")
+                
+                # שחזור אלגוריתם הדוחות המדויק
+                earn = res_data.get("earningsHistory", {}).get("history", [])
+                beat_list = []
+                for q in earn:
+                    act = q.get("epsActual", {}).get("raw")
+                    est = q.get("epsEstimate", {}).get("raw")
+                    if act is not None and est is not None:
+                        beat_list.append(act >= est)
+                info["earnings_beat_list"] = beat_list
     except:
-        return {}
+        pass
+
+    # שכבה 2: גיבוי דרך הספרייה הרגילה
+    if not info.get("recommendationKey") or info.get("revenueGrowth") is None:
+        try:
+            t = yf.Ticker(ticker_clean)
+            yi = t.info
+            info["revenueGrowth"] = info.get("revenueGrowth") or yi.get("revenueGrowth")
+            info["recommendationKey"] = info.get("recommendationKey") or yi.get("recommendationKey")
+            info["numberOfAnalystOpinions"] = info.get("numberOfAnalystOpinions") or yi.get("numberOfAnalystOpinions")
+        except:
+            pass
+
+    return info
 
 def do_scan(mode):
     tickers  = load_tickers()
@@ -451,9 +454,7 @@ def _fetch_history_with_retry(ticker, attempts=3):
     last_error = None
     for i in range(attempts):
         try:
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)
             df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             if not df.empty and len(df) >= 30:
                 return df, t, None
@@ -512,23 +513,31 @@ def analyze_ticker(ticker):
 
         info = fetch_fundamentals(clean_ticker)
 
-        # שימוש בפונקציית האופציות המשופרת
-        options_text = "אין נתוני אופציות"
-        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
-        total_oi = calls_oi + puts_oi
-        if total_oi > 0:
-            calls_ratio = (calls_oi / total_oi) * 100
-            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
-
-        # דוחות
+        # עיבוד והצגת דוחות כספיים - שוחזר האלגוריתם המקורי
         earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
+        beat_list = info.get("earnings_beat_list", [])
+        if beat_list:
+            total_q = len(beat_list)
+            beats = sum(1 for b in beat_list if b)
+            earnings_badge = f"{beats}/{total_q}"
+            if beats == total_q:
+                earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים (מושלם)"
+                earnings_pos = True
+            elif beats >= total_q / 2:
+                earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים"
+                earnings_pos = True
+            else:
+                earnings_text = f"פספסה תחזיות ברוב הרבעונים האחרונים ({beats}/{total_q})"
+                earnings_pos = False
+
+        # צפי נתונים פיננסיים
         rev_growth = info.get("revenueGrowth")
         forecast_text, forecast_pos = ("אין תחזית זמינה", None)
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
             forecast_text, forecast_pos = (f"צפי לגדילה ב-{rev_growth_pct}%", True) if rev_growth_pct >= 0 else (f"צפי לירידה ב-{abs(rev_growth_pct)}%", False)
 
-        # המלצות
+        # הערכת אנליסטים
         rec_key = info.get("recommendationKey")
         num_analysts = info.get("numberOfAnalystOpinions")
         rec_text, rec_badge, rec_pos = "אין המלצות", "לא זמין", None
@@ -537,6 +546,14 @@ def analyze_ticker(ticker):
             rec_text = f"המלצה: {translated_rec} ({num_analysts} אנליסטים)" if num_analysts else f"המלצה: {translated_rec}"
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
+
+        # עיבוד אופציות דרך הפונקציה החדשה
+        options_text = "אין נתוני אופציות"
+        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
+        total_oi = calls_oi + puts_oi
+        if total_oi > 0:
+            calls_ratio = (calls_oi / total_oi) * 100
+            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
         
         # המלצת AI
         ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
