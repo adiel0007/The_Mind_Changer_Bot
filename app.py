@@ -149,15 +149,31 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# מחולל זהויות דפדפן כדי למנוע חסימות של יאהו
-def get_random_user_agent():
-    ua_list = [
+# ---------------------------------------------------------
+# מנגנון שריון חדש נגד חסימות יאהו פייננס
+# ---------------------------------------------------------
+@st.cache_resource(ttl=3600)
+def get_robust_yf_session():
+    session = requests.Session()
+    ua = random.choice([
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    ]
-    return random.choice(ua_list)
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0"
+    ])
+    session.headers.update({
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
+    })
+    try:
+        # פנייה לדף הבית של יאהו כדי לקבל קוקיז אמיתיים של דפדפן
+        session.get("https://finance.yahoo.com", timeout=5)
+    except:
+        pass
+    return session
 
 def get_best_gemini_model():
     try:
@@ -186,14 +202,14 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
-# משיכה המונית כדי למנוע עומס על יאהו בכניסה לאתר
 @st.cache_data(ttl=45, show_spinner=False)
 def fetch_all_market_data():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ", "^GSPC", "^IXIC", "^DJI"]
     quotes_res, indices_res, live_stocks_res = [], [], []
+    session = get_robust_yf_session()
     
     try:
-        df = yf.download(symbols, period="5d", interval="1d", progress=False)
+        df = yf.download(symbols, period="5d", interval="1d", progress=False, session=session)
         if not df.empty:
             close_df = df["Close"] if isinstance(df.columns, pd.MultiIndex) else df
             for sym in symbols:
@@ -235,16 +251,15 @@ def get_fear_greed_data():
     return 55, "ניטרלי 😐"
 
 # =========================================================================
-# פונקציות הליבה - *ללא CACHE בכלל* - תמיד מביאות נתונים חיים
+# פונקציות הליבה - העברת ה-Session האנושי לכל הבקשות
 # =========================================================================
 
-def fetch_options_sentiment(ticker_symbol):
+def fetch_options_sentiment(ticker_symbol, session):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
 
-    # שכבה 1: שימוש נקי ב-yfinance שמנהל בעצמו את ה-Cookies
     try:
-        t = yf.Ticker(ticker_clean)
+        t = yf.Ticker(ticker_clean, session=session)
         dates = t.options
         if dates:
             for d in dates[:2]:
@@ -255,48 +270,28 @@ def fetch_options_sentiment(ticker_symbol):
                     puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
             if calls_oi > 0 or puts_oi > 0: 
                 return calls_oi, puts_oi
-    except:
-        pass
-
-    # שכבה 2: גיבוי API ישיר למקרה שהספריה נחסמה
-    try:
-        headers = {"User-Agent": get_random_user_agent()}
-        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            data = res.json().get("optionChain", {}).get("result", [])
-            if data:
-                for exp in data[0].get("expirationDates", [])[:2]:
-                    exp_res = requests.get(f"{url}?date={exp}", headers=headers, timeout=5)
-                    if exp_res.status_code == 200:
-                        chain = exp_res.json().get("optionChain", {}).get("result", [])
-                        if chain and chain[0].get("options"):
-                            for c in chain[0]["options"][0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
-                            for p in chain[0]["options"][0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
-    except:
+    except Exception as e:
         pass
 
     return calls_oi, puts_oi
 
-def fetch_fundamentals(ticker_symbol):
+def fetch_fundamentals(ticker_symbol, session):
     ticker_clean = ticker_symbol.strip().upper()
     info = {}
     
     try:
-        t = yf.Ticker(ticker_clean)
+        t = yf.Ticker(ticker_clean, session=session)
         fast = t.info or {}
         info["revenueGrowth"] = fast.get("revenueGrowth")
         info["recommendationKey"] = fast.get("recommendationKey")
         info["numberOfAnalystOpinions"] = fast.get("numberOfAnalystOpinions")
         info["profitMargins"] = fast.get("profitMargins")
         
-        # הבאת נתוני דוחות וטיפול קריטי באזורי זמן (Timezones)
         earn_df = t.earnings_dates
         if earn_df is not None and not earn_df.empty:
             past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS']).copy()
             now_utc = pd.Timestamp.utcnow()
             
-            # תיקון אזורי זמן כדי למנוע קריסת השוואה
             if past_earn.index.tz is None:
                 past_earn.index = past_earn.index.tz_localize('UTC')
             else:
@@ -312,28 +307,6 @@ def fetch_fundamentals(ticker_symbol):
     except Exception:
         pass
 
-    # שכבה 2: גיבוי מסורתי מה-API אם ה-DataFrame היה ריק
-    if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
-        try:
-            headers = {"User-Agent": get_random_user_agent()}
-            url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=earningsHistory"
-            res = requests.get(url, headers=headers, timeout=5)
-            if res.status_code == 200:
-                data = res.json().get("quoteSummary", {}).get("result", [])
-                if data:
-                    earn = data[0].get("earningsHistory", {}).get("history", [])
-                    beat_list = []
-                    for q in earn:
-                        act = q.get("epsActual", {}).get("raw")
-                        est = q.get("epsEstimate", {}).get("raw")
-                        if act is not None and est is not None: 
-                            beat_list.append(act >= est)
-                    if beat_list:
-                        info["earnings_beat_list"] = beat_list[-4:]
-        except:
-            pass
-
-    # שכבה 3: יצירת הגיבוי הטקסטואלי רק במקרה קיצון
     if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
         if info.get("profitMargins"):
             pm_pct = round(info.get("profitMargins", 0) * 100, 1)
@@ -349,12 +322,13 @@ def do_scan(mode):
     progress = st.progress(0)
     status   = st.empty()
     total    = len(tickers)
+    session  = get_robust_yf_session()
     
     for i, ticker in enumerate(tickers):
         status.markdown(f"<div style='color:#c9a84c;font-size:0.85rem;text-align:center;margin-bottom:10px;'>🔍 סורק {ticker}... ({i+1}/{total})</div>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(ticker, session=session)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             
@@ -420,12 +394,10 @@ def normalize_ticker(raw_ticker):
     if "." in t: t = t.replace(".", "-")
     return t
 
-def _fetch_history_with_retry(ticker, attempts=3):
+def _fetch_history_with_retry(ticker, session, attempts=3):
     last_error = None
     for i in range(attempts):
         try:
-            session = requests.Session()
-            session.headers.update({"User-Agent": get_random_user_agent()})
             t = yf.Ticker(ticker, session=session)
             df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             if not df.empty and len(df) >= 30:
@@ -438,7 +410,8 @@ def _fetch_history_with_retry(ticker, attempts=3):
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
-        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
+        session = get_robust_yf_session()
+        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, session, attempts=3)
 
         if df.empty or len(df) < 30:
             return {"_error": "invalid"}
@@ -470,14 +443,13 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = ("חסר נתונים", None)
 
-        info = fetch_fundamentals(clean_ticker)
+        info = fetch_fundamentals(clean_ticker, session)
 
-        # אופציות + תגית לונג/שורט
         options_text = "אין נתוני אופציות"
         options_badge = "לא זמין"
         options_pos = None
         
-        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
+        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker, session)
         total_oi = calls_oi + puts_oi
         if total_oi > 0:
             calls_ratio = (calls_oi / total_oi) * 100
@@ -490,17 +462,15 @@ def analyze_ticker(ticker):
                 options_badge = "שורט"
                 options_pos = False
 
-        # דוחות פיננסיים (השתמשנו בגיבוי החכם)
         earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
         beat_list = info.get("earnings_beat_list", [])
         
         if beat_list:
-            total_q = len(beat_list) # בדרך כלל 4 רבעונים
+            total_q = len(beat_list)
             beats = sum(1 for b in beat_list if b)
             earnings_badge = f"{beats}/{total_q}"
             earnings_pos = True if beats >= total_q / 2 else False
             
-            # הלוגיקה החדשה והמדויקת למלל שביקשת
             if beats == total_q:
                 earnings_text = f"פגע בתחזית רווח ב-{total_q} מתוך {total_q} רבעונים אחרונים"
             else:
@@ -511,14 +481,12 @@ def analyze_ticker(ticker):
             earnings_badge = info.get("fallback_earnings_badge", "מידע")
             earnings_pos = info.get("fallback_earnings_pos")
 
-        # צפי נתונים פיננסיים
         rev_growth = info.get("revenueGrowth")
         forecast_text, forecast_pos = ("אין תחזית זמינה", None)
         if rev_growth is not None:
             rev_growth_pct = round(rev_growth * 100, 1)
             forecast_text, forecast_pos = (f"צפי לגדילה ב-{rev_growth_pct}%", True) if rev_growth_pct >= 0 else (f"צפי לירידה ב-{abs(rev_growth_pct)}%", False)
 
-        # הערכת אנליסטים
         rec_key = info.get("recommendationKey")
         num_analysts = info.get("numberOfAnalystOpinions")
         rec_text, rec_badge, rec_pos = "אין המלצות", "לא זמין", None
@@ -528,7 +496,6 @@ def analyze_ticker(ticker):
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
         
-        # המלצת AI מוגנת ובלתי שבירה
         ai_recommendation = ""
         try:
             if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
@@ -537,13 +504,16 @@ def analyze_ticker(ticker):
                 prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. סנטימנט האופציות הוא {options_badge}. כתוב 2 משפטים בעברית שמסכמים את המצב, וסיים במילה: 'קנייה', 'מכירה', או 'המתנה'."
                 ai_recommendation = model.generate_content(prompt).text.strip()
             else:
-                raise ValueError("No Key")
-        except Exception:
-            # הגיבוי האוטומטי
+                raise ValueError("No API Key Provided")
+        except Exception as e:
+            error_msg = str(e).lower()
             rec_word = "המתנה"
             if ma_status == "לונג" and rsi < 65 and options_badge in ["לונג", "לא זמין"]: rec_word = "קנייה"
             elif ma_status == "שורט" and rsi > 35: rec_word = "מכירה"
-            ai_recommendation = f"השרתים עמוסים, ולכן המערכת מפיקה המלצה טכנית: זוהה מומנטום של {ma_status} יחד עם RSI ברמה של {rsi:.1f}. המלצת המערכת (גיבוי אוטומטי): **{rec_word}**."
+            
+            # עכשיו הגיבוי יגיד לך למה ה-AI נכשל באמת
+            reason = "חריגה ממכסת שימוש" if "429" in error_msg or "quota" in error_msg else "מפתח שגוי או שגיאת רשת"
+            ai_recommendation = f"<b>ה-AI לא זמין כרגע ({reason}).</b><br>המערכת מפיקה המלצה טכנית אוטומטית: זוהה מומנטום של {ma_status} יחד עם RSI ברמה של {rsi:.1f}. המלצה טכנית בלבד: **{rec_word}**."
 
         return {
             "ticker": clean_ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg >= 0 else f"{chg}%", "up": chg >= 0,
@@ -811,12 +781,13 @@ with tab_long:
             if run_deep_l:
                 with st.spinner("מבצע סינון עומק: בודק 3 ימים ירוקים ויחס קולים..."):
                     deep_filtered = []
+                    session = get_robust_yf_session()
                     for item in st.session_state.long_results:
                         try:
                             ticker_sym = item["symbol"]
-                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym, session)
                             if calls_oi > puts_oi:
-                                ticker_obj = yf.Ticker(ticker_sym)
+                                ticker_obj = yf.Ticker(ticker_sym, session=session)
                                 hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                                 hist = hist.dropna(subset=["Volume"])
                                 if len(hist) >= 4:
@@ -894,10 +865,11 @@ with tab_short:
             if run_deep_s:
                 with st.spinner("מבצע סינון עומק: בודק יחס אופציות (Puts > Calls)..."):
                     deep_filtered_short = []
+                    session = get_robust_yf_session()
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
-                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym, session)
                             if puts_oi > calls_oi:
                                 deep_filtered_short.append(item)
                         except:
@@ -926,7 +898,7 @@ with tab_ai:
                     st.session_state.analysis = res
                 else:
                     st.session_state.analysis = None
-                    st.error("הבורסה עמוסה כרגע וחסמה את הבקשה. אנא לחץ שוב על 'נתח מניה'.")
+                    st.error("הבורסה עמוסה כרגע וחסמה את הבקשה. המערכת ניסתה לעקוף את החסימה ללא הצלחה. אנא נסה שוב בעוד מספר שניות.")
                         
         if st.session_state.analysis:
             st.markdown(render_analysis(st.session_state.analysis), unsafe_allow_html=True)
@@ -963,8 +935,15 @@ with tab_ai:
                         """
                         response = model.generate_content(prompt_text)
                         st.session_state.ai_answer = response.text
-                    except Exception:
-                        st.session_state.ai_answer = "<b>החיבור לשרתי ה-AI עמוס כרגע.</b><br>המערכת חסמה את הבקשה זמנית כדי למנוע קריסה. אנא נסה שוב בעוד מספר שניות."
+                    # כאן הוספנו את בלוק חשיפת השגיאות האמיתיות במקום המלל הגנרי!
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        if "429" in error_str or "quota" in error_str:
+                            st.session_state.ai_answer = "<b>שגיאה מצד Google Gemini:</b> חריגה ממכסת השימוש (Quota Exceeded). בדוק את החשבון שלך או נסה שוב מאוחר יותר."
+                        elif "api_key" in error_str or "400" in error_str:
+                            st.session_state.ai_answer = "<b>שגיאה מצד Google Gemini:</b> מפתח ה-API שהוזן אינו תקין או שפג תוקפו."
+                        else:
+                            st.session_state.ai_answer = f"<b>שגיאת תקשורת מול ה-AI:</b><br><span style='color:#dc2626; font-size:0.75rem;'>{str(e)}</span><br>אנא נסה שוב."
                         
         if st.session_state.ai_answer:
             st.markdown(f"""
@@ -1042,11 +1021,12 @@ with tab_market_dir:
     if run_qqq:
         with st.spinner("סורק נתונים חיים ומחשב ניקוד שוק משוקלל..."):
             try:
-                qqq = yf.Ticker("QQQ")
+                session = get_robust_yf_session()
+                qqq = yf.Ticker("QQQ", session=session)
                 df = qqq.history(period="5y", interval="1d", auto_adjust=True)
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 
-                calls_oi, puts_oi = fetch_options_sentiment("QQQ")
+                calls_oi, puts_oi = fetch_options_sentiment("QQQ", session)
                 
                 market_score = 0
                 
