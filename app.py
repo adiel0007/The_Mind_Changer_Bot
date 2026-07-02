@@ -149,7 +149,6 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# פונקציה חכמה לאיתור ובחירת המודל התקין ביותר שזמין ל-API
 def get_best_gemini_model():
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -161,24 +160,7 @@ def get_best_gemini_model():
             return genai.GenerativeModel(available_models[0])
     except Exception:
         pass
-    # גיבוי אחרון בהחלט
     return genai.GenerativeModel('gemini-1.5-flash')
-
-def get_session():
-    agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
-    ]
-    s = requests.Session()
-    s.headers.update({
-        'User-Agent': random.choice(agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-    })
-    return s
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -271,20 +253,63 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
-# ====== תיקון פונקציית האופציות - מנגנון חסין כשלים ========
+# =========================================================================
+# פונקציית חילוץ אופציות אולטימטיבית (עוקפת חסימות Rate Limits/401 של Yahoo)
+# =========================================================================
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
+    ticker_clean = ticker_symbol.strip().upper()
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive"
     }
-
-    # 1. ניסיון משיכה באמצעות yfinance
+    
+    # שכבה 1: API סודי של יאהו ע"י קבלת Crumb קודם לכן (עוקף חסימה יעיל מאוד)
     try:
-        t = yf.Ticker(ticker_symbol)
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        session.get("https://fc.yahoo.com", allow_redirects=True, timeout=5)
+        crumb_res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=5)
+        crumb = crumb_res.text.strip()
+        
+        if crumb:
+            url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?crumb={crumb}"
+            res = session.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                result = data.get("optionChain", {}).get("result", [])
+                if result:
+                    expirations = result[0].get("expirationDates", [])
+                    for exp in expirations[:2]:
+                        exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}&crumb={crumb}"
+                        exp_res = session.get(exp_url, timeout=5)
+                        if exp_res.status_code == 200:
+                            exp_data = exp_res.json()
+                            options_chain = exp_data.get("optionChain", {}).get("result", [])
+                            if options_chain:
+                                chain = options_chain[0].get("options", [])
+                                if chain:
+                                    for c in chain[0].get("calls", []): calls_oi += c.get("openInterest", 0)
+                                    for p in chain[0].get("puts", []): puts_oi += p.get("openInterest", 0)
+                    
+                    if calls_oi > 0 or puts_oi > 0:
+                        return calls_oi, puts_oi
+    except:
+        pass
+
+    # שכבה 2: ספריית yfinance עם סשן חי
+    try:
+        session = requests.Session()
+        session.headers.update(headers)
+        t = yf.Ticker(ticker_clean, session=session)
         dates = t.options
         if dates:
-            for date in dates[:3]:
+            for date in dates[:2]:
                 try:
                     chain = t.option_chain(date)
                     if 'openInterest' in chain.calls.columns:
@@ -297,54 +322,25 @@ def fetch_options_sentiment(ticker_symbol):
                 return calls_oi, puts_oi
     except:
         pass
-
-    # 2. ניסיון גיבוי אגרסיבי ישירות משרתי Yahoo Finance (עוקף חסימות)
+        
+    # שכבה 3: yfinance טהור (גיבוי אחרון)
     try:
-        session = requests.Session()
-        session.headers.update(headers)
-        
-        # קבלת קוקיז 
-        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=5)
-        
-        # ניסיון קבלת Crumb
-        crumb = ""
-        try:
-            c_res = session.get('https://query1.finance.yahoo.com/v1/test/getcrumb', timeout=5)
-            if c_res.status_code == 200:
-                crumb = c_res.text.strip()
-        except:
-            pass
-            
-        base_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
-        url = f"{base_url}?crumb={crumb}" if crumb else base_url
-        
-        res = session.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get('optionChain', {}).get('result', [])
-            if result:
-                exp_dates = result[0].get('expirationDates', [])
-                for exp in exp_dates[:3]:
-                    exp_url = f"{base_url}?date={exp}&crumb={crumb}" if crumb else f"{base_url}?date={exp}"
-                    exp_res = session.get(exp_url, timeout=5)
-                    if exp_res.status_code == 200:
-                        exp_data = exp_res.json()
-                        opts = exp_data.get('optionChain', {}).get('result', [])
-                        if opts and len(opts) > 0:
-                            opt_list = opts[0].get('options', [])
-                            if opt_list and len(opt_list) > 0:
-                                for c in opt_list[0].get('calls', []):
-                                    calls_oi += c.get('openInterest', 0) or 0
-                                for p in opt_list[0].get('puts', []):
-                                    puts_oi += p.get('openInterest', 0) or 0
-        
-        if calls_oi > 0 or puts_oi > 0:
-            return calls_oi, puts_oi
+        t = yf.Ticker(ticker_clean)
+        dates = t.options
+        if dates:
+            for date in dates[:2]:
+                try:
+                    chain = t.option_chain(date)
+                    if 'openInterest' in chain.calls.columns:
+                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                    if 'openInterest' in chain.puts.columns:
+                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+                except:
+                    continue
     except:
         pass
-        
+
     return calls_oi, puts_oi
-# ==========================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_fundamentals(ticker_symbol):
@@ -429,7 +425,6 @@ def do_scan(mode):
                 is_red_3 = close_3 < open_3
                 
                 three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
-                
                 lowest_candle = (low_1 < low_2) and (low_1 < low_3) and (high_1 < high_2) and (high_1 < high_3)
                 
                 above_all_emas_1 = (high_1 > ema9) and (high_1 > ema100) and (high_1 > ema200)
@@ -456,7 +451,8 @@ def _fetch_history_with_retry(ticker, attempts=3):
     last_error = None
     for i in range(attempts):
         try:
-            session = get_session()
+            session = requests.Session()
+            session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             t = yf.Ticker(ticker, session=session)
             df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             if not df.empty and len(df) >= 30:
@@ -469,10 +465,7 @@ def _fetch_history_with_retry(ticker, attempts=3):
             if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
                 df2.columns = df2.columns.get_level_values(0)
             if not df2.empty and len(df2) >= 30:
-                try:
-                    t_obj = yf.Ticker(ticker, session=get_session())
-                except Exception:
-                    t_obj = yf.Ticker(ticker)
+                t_obj = yf.Ticker(ticker)
                 return df2, t_obj, None
         except Exception as e:
             last_error = e
@@ -510,13 +503,16 @@ def analyze_ticker(ticker):
         
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
-        ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
-        ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
+        if len(df) >= 200:
+            ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+            ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+            ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
+        else:
+            ma_status, ma_pos = ("חסר נתונים", None)
 
         info = fetch_fundamentals(clean_ticker)
 
-        # אופציות
+        # שימוש בפונקציית האופציות המשופרת
         options_text = "אין נתוני אופציות"
         calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
@@ -1093,7 +1089,7 @@ with tab_market_dir:
                         <div style="font-size: 0.75rem; color: #7a7060;">ערך נוכחי: {rsi_val:.1f}</div>
                     </div>
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
-                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעול מחיר (נרות)</div>
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
                         <div style="font-size: 0.75rem; color: #7a7060;">הסגירה היומית מול הסגירה אתמול</div>
                     </div>
