@@ -149,6 +149,37 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
+# פונקציה חכמה לאיתור ובחירת המודל התקין ביותר שזמין ל-API (Fix 404 Errors)
+def get_best_gemini_model():
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        preferred_models = ['models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro-latest', 'models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
+        for pref in preferred_models:
+            if pref in available_models:
+                return genai.GenerativeModel(pref)
+        if available_models:
+            return genai.GenerativeModel(available_models[0])
+    except Exception:
+        pass
+    # גיבוי אחרון בהחלט
+    return genai.GenerativeModel('gemini-1.5-flash')
+
+def get_session():
+    agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
+    ]
+    s = requests.Session()
+    s.headers.update({
+        'User-Agent': random.choice(agents),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    })
+    return s
+
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -282,11 +313,12 @@ def do_scan(mode):
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
-            if df.empty or len(df) < 200:
+            # ביטול חסימת ה-200 ימים. מספיק 30 ימים לצורך חישובי מומנטום בסיסיים
+            if df.empty or len(df) < 30:
                 continue
                 
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
-            if len(df) < 200:
+            if len(df) < 30:
                 continue
             
             close = df["Close"]
@@ -294,7 +326,6 @@ def do_scan(mode):
             prev  = float(close.iloc[-2])
             rsi   = calculate_rsi(close)
             
-            # עברנו לחישוב EMA (אקספוננציאלי) שיסונכרן עם הגרפים המקצועיים
             ema9   = float(close.ewm(span=9, adjust=False).mean().iloc[-1])
             ema100 = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
             ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
@@ -313,22 +344,28 @@ def do_scan(mode):
                 ath = float(df["High"].max())
                 not_at_ath_long = last < (ath * 0.92)
                 
-                # חסימות אבסולוטיות
                 overextended = (last > ema9) and (last > ema100) and (last > ema200)
-                below_majors = (last < ema100) and (last < ema200)  # חסימה של כל מניה שמתחת ל-100 ו-200 במקביל
+                below_majors = (last < ema100) and (last < ema200)
+                
+                is_green_1 = (close_1 > open_1)
+                is_green_2 = (close_2 > open_2)
                 
                 if (rsi < 70 and vol > 300_000 
                     and not overextended 
                     and not below_majors 
-                    and close_1 > open_1 
+                    and is_green_1 
+                    and is_green_2 
                     and last > prev
                     and not_at_ath_long):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                # אכיפת ירידות: חובה ששני הימים יסגרו נמוך יותר
-                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
+                is_red_1 = close_1 < open_1
+                is_red_2 = close_2 < open_2
+                is_red_3 = close_3 < open_3
                 
-                if (rsi > 30 and vol > 300_000 and two_consecutive_negative_closes):
+                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
+                
+                if (rsi > 30 and vol > 300_000 and three_consecutive_down_and_red):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -373,13 +410,9 @@ def analyze_ticker(ticker):
         
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        if len(df) >= 200:
-            # ממוצעים אקספוננציאליים (EMA) לדיוק מלא
-            ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
-            ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
-            ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
-        else:
-            ma_status, ma_pos = ("חסר נתונים", None)
+        ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+        ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+        ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
 
         info = fetch_fundamentals(clean_ticker)
 
@@ -414,10 +447,10 @@ def analyze_ticker(ticker):
         if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = get_best_gemini_model()
                 prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים הנעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. המטרה שלך: כתוב בדיוק 2 משפטים בעברית שמסכמים את המצב, וסיים במילה אחת מפורשת בלבד (המלצת מסחר): 'קנייה', 'מכירה', או 'המתנה'."
                 ai_recommendation = model.generate_content(prompt).text.strip()
-            except:
+            except Exception as e:
                 ai_recommendation = "שגיאת התחברות לשרתי ה-AI בעת ניתוח המניה."
 
         return {
@@ -628,8 +661,9 @@ with tab_long:
     <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית, רחוקה לפחות מ-8% מתחת לשיא כל הזמנים</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
     <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל EMA 9, 100 ו-200 במקביל.</li>
-    <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-EMA 100 ו-200 בו זמנית. (נדרש מינימום 200 ימי מסחר קיימים)</li>
+    <li><div class="crit-dot dot-green"></div>מבנה נרות: שני ימי המסחר האחרונים ירוקים והיום נסגר גבוה מאתמול.</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חסימת כניסה למניות שנסחרות מעל EMA 9, 100 ו-200 במקביל.</li>
+    <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-EMA 100 ו-200 בו זמנית.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -657,6 +691,38 @@ with tab_long:
   </div>
   {long_cards}
 </div>""", unsafe_allow_html=True)
+        
+        if st.session_state.long_results:
+            f_col1, f_col2 = st.columns([3, 1])
+            with f_col1:
+                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+                run_deep_l = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with f_col2:
+                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+                stop_deep_l = st.button("עצור 🛑", key="stop_deep_l_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            if stop_deep_l:
+                st.stop()
+            if run_deep_l:
+                with st.spinner("מבצע סינון עומק מחזורי..."):
+                    deep_filtered = []
+                    for item in st.session_state.long_results:
+                        try:
+                            ticker_sym = item["symbol"]
+                            ticker_obj = yf.Ticker(ticker_sym)
+                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                            hist = hist.dropna(subset=["Volume"])
+                            if len(hist) >= 20:
+                                avg_vol_3d = hist["Volume"].iloc[-3:].mean()
+                                avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
+                                if avg_vol_3d > avg_vol_20d:
+                                    deep_filtered.append(item)
+                        except:
+                            pass
+                    st.session_state.long_results = deep_filtered
+                    st.rerun()
 
 with tab_short:
     col1, col2 = st.columns([1, 2])
@@ -669,7 +735,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: שני ימי מסחר רצופים של סגירות שליליות</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -697,6 +763,40 @@ with tab_short:
   </div>
   {short_cards}
 </div>""", unsafe_allow_html=True)
+        
+        if st.session_state.short_results:
+            f_col1, f_col2 = st.columns([3, 1])
+            with f_col1:
+                st.markdown('<div class="gold-btn">', unsafe_allow_html=True)
+                run_deep_s = st.button("תסנן לי עוד ⚡", key="deep_filter_volume_short_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with f_col2:
+                st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+                stop_deep_s = st.button("עצור 🛑", key="stop_deep_s_trigger")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            if stop_deep_s:
+                st.stop()
+            if run_deep_s:
+                with st.spinner("מבצע סינון עומק מחזורי ובודק יחס אופציות (Puts > Calls)..."):
+                    deep_filtered_short = []
+                    for item in st.session_state.short_results:
+                        try:
+                            ticker_sym = item["symbol"]
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
+                            if puts_oi > calls_oi:
+                                ticker_obj = yf.Ticker(ticker_sym)
+                                hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                                hist = hist.dropna(subset=["Volume"])
+                                if len(hist) >= 20:
+                                    avg_vol_3d = hist["Volume"].iloc[-3:].mean()
+                                    avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
+                                    if avg_vol_3d > avg_vol_20d:
+                                        deep_filtered_short.append(item)
+                        except:
+                            pass
+                    st.session_state.short_results = deep_filtered_short
+                    st.rerun()
 
 with tab_ai:
     col1, col2 = st.columns([1, 1])
@@ -743,7 +843,7 @@ with tab_ai:
                 with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                     try:
                         genai.configure(api_key=GEMINI_API_KEY)
-                        model = genai.GenerativeModel('gemini-1.5-pro')
+                        model = get_best_gemini_model()
                         current_date = datetime.now().strftime("%d/%m/%Y")
                         prompt_text = f"""
                         היום אנחנו בתאריך {current_date}.
