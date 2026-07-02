@@ -311,7 +311,6 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                # משיכת 5 שנות נתונים כדי שהחישוב של ממוצע 200 EMA יהיה מדויק ב-100% וישתווה למערכות המסחר
                 df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             
             if df.empty or len(df) < 30:
@@ -326,36 +325,35 @@ def do_scan(mode):
             prev  = float(close.iloc[-2])
             rsi   = calculate_rsi(close)
             
-            # חישוב אקספוננציאלי (EMA) בדיוק כמו בגרפים המקצועיים
-            ema9   = float(close.ewm(span=9, adjust=False).mean().iloc[-1])
-            ema100 = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
-            ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+            ema9_series   = close.ewm(span=9, adjust=False).mean()
+            ema100_series = close.ewm(span=100, adjust=False).mean()
+            ema200_series = close.ewm(span=200, adjust=False).mean()
+            
+            ema9   = float(ema9_series.iloc[-1])
+            ema100 = float(ema100_series.iloc[-1])
+            ema200 = float(ema200_series.iloc[-1])
             
             vol_today = int(df["Volume"].iloc[-1])
             vol_yest = int(df["Volume"].iloc[-2])
             vol = max(vol_today, vol_yest) 
             
-            # בדיקת מומנטום של ווליום
             avg_vol_3d = float(df["Volume"].iloc[-3:].mean())
             avg_vol_20d = float(df["Volume"].rolling(20).mean().iloc[-1])
             vol_momentum_ok = avg_vol_3d > avg_vol_20d
             
             chg   = round(((last - prev) / prev) * 100, 2)
             
-            open_1, close_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1])
-            open_2, close_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2])
-            open_3, close_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3])
+            open_1, close_1, high_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1])
+            open_2, close_2, high_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2])
+            open_3, close_3, high_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3]), float(df["High"].iloc[-3])
             
             if mode == "long":
                 ath = float(df["High"].max())
                 not_at_ath_long = last < (ath * 0.92)
                 
-                # חוק נוקשה - נפסל אם מעל כולם במקביל
                 overextended = (last > ema9) and (last > ema100) and (last > ema200)
-                # חוק נוקשה - נפסל הרמטית אם מתחת ל-100 ו-200, לא משנה היכן הוא ממוקם מול ה-9
                 below_majors = (last < ema100) and (last < ema200)
                 
-                # חובה שני ימים ירוקים ברצף
                 is_green_1 = (close_1 > open_1)
                 is_green_2 = (close_2 > open_2)
                 
@@ -376,7 +374,13 @@ def do_scan(mode):
                 
                 three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
                 
-                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red):
+                # חסימת פלדה לשורט: פסילת מניות שנסחרו מעל כל הממוצעים יחד באחד מ-3 הימים האחרונים (המניה חזקה מדי לשורט)
+                above_all_emas_1 = (high_1 > ema9) and (high_1 > ema100) and (high_1 > ema200)
+                above_all_emas_2 = (high_2 > ema9_series.iloc[-2]) and (high_2 > ema100_series.iloc[-2]) and (high_2 > ema200_series.iloc[-2])
+                above_all_emas_3 = (high_3 > ema9_series.iloc[-3]) and (high_3 > ema100_series.iloc[-3]) and (high_3 > ema200_series.iloc[-3])
+                traded_above_all_recently = above_all_emas_1 or above_all_emas_2 or above_all_emas_3
+                
+                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red and not traded_above_all_recently):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -786,6 +790,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
     <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
+    <li><div class="crit-dot dot-red"></div>חסימה נוקשה: פסילת מניות שנסחרו (אפילו בזנב הנר) מעל EMA 9, 100 ו-200 בו זמנית ב-3 הימים האחרונים.</li>
     <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): בודק יחס אופציות ומאשר רק מניות עם יותר Puts מ-Calls.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
