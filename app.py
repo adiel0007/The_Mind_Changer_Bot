@@ -369,10 +369,14 @@ def do_scan(mode):
                     and not_at_ath_long):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                # הוגדר ספציפית: 2 סגירות שליליות רצופות לשורט
-                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
+                # אכיפת ירידות: חובה ששלושת הימים יהיו אדומים, וכל סגירה נמוכה מקודמתה
+                is_red_1 = close_1 < open_1
+                is_red_2 = close_2 < open_2
+                is_red_3 = close_3 < open_3
                 
-                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and two_consecutive_negative_closes):
+                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
+                
+                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -445,12 +449,9 @@ def analyze_ticker(ticker):
         
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        if len(df) >= 200:
-            ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
-            ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
-            ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
-        else:
-            ma_status, ma_pos = ("חסר נתונים", None)
+        ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+        ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+        ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
 
         info = fetch_fundamentals(clean_ticker)
 
@@ -784,7 +785,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 2 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
     <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): בודק יחס אופציות ומאשר רק מניות עם יותר Puts מ-Calls.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
