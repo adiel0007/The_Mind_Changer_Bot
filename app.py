@@ -254,105 +254,153 @@ def get_fear_greed_data():
     return 55, "ניטרלי 😐"
 
 # =========================================================================
-# פונקציית אופציות אולטימטיבית (Bypass API)
+# פונקציות הליבה המשופרות: הוצאת ה-CACHE כדי למנוע הרעלה + מערכת גיבוי כפולה
 # =========================================================================
-@st.cache_data(ttl=600, show_spinner=False)
+
+def get_yahoo_crumb_and_cookie():
+    """מייצר סשן אמיתי שגונב ליאהו את ה-Crumb כדי לעקוף חסימות אבטחה"""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive"
+    })
+    try:
+        session.get("https://fc.yahoo.com", timeout=3)
+        res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=3)
+        if res.status_code == 200:
+            return session, res.text.strip()
+    except:
+        pass
+    return session, ""
+
 def fetch_options_sentiment(ticker_symbol):
-    calls_oi, puts_oi = 0, 0
+    """נבנה ללא Cache! במקרה של תקלה, לחיצה על רענן מיד תתקן"""
     ticker_clean = ticker_symbol.strip().upper()
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
-
-    # שכבה 1: API ישיר של Yahoo ללא צורך בספריות מתווכות
-    try:
-        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get("optionChain", {}).get("result", [])
-            if result:
-                expirations = result[0].get("expirationDates", [])
-                for exp in expirations[:2]:
-                    exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
-                    exp_res = requests.get(exp_url, headers=headers, timeout=5)
-                    if exp_res.status_code == 200:
-                        exp_data = exp_res.json()
-                        chain = exp_data.get("optionChain", {}).get("result", [])
-                        if chain:
-                            options = chain[0].get("options", [])
-                            if options:
-                                for c in options[0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
-                                for p in options[0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
-                if calls_oi > 0 or puts_oi > 0:
-                    return calls_oi, puts_oi
-    except:
-        pass
-
-    # שכבה 2: גיבוי למקרה שה-API הישיר חסום
-    try:
-        t = yf.Ticker(ticker_clean)
-        dates = t.options
-        if dates:
-            for date in dates[:2]:
-                try:
-                    chain = t.option_chain(date)
-                    if 'openInterest' in chain.calls.columns:
-                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                    if 'openInterest' in chain.puts.columns:
-                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
-                except:
-                    continue
-    except:
-        pass
-
-    return calls_oi, puts_oi
-
-# =========================================================================
-# פונקציית נתוני יסוד (דוחות ואנליסטים) אולטימטיבית
-# =========================================================================
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_fundamentals(ticker_symbol):
-    ticker_clean = ticker_symbol.strip().upper()
-    info = {}
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
-
-    # שכבה 1: שליפה ישירה ממאגר הנתונים הסודי של יאהו
-    try:
-        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=financialData,defaultKeyStatistics,earningsHistory"
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            data = res.json().get("quoteSummary", {}).get("result", [])
-            if data:
-                res_data = data[0]
-                
-                fin = res_data.get("financialData", {})
-                info["revenueGrowth"] = fin.get("revenueGrowth", {}).get("raw")
-                info["recommendationKey"] = fin.get("recommendationKey")
-                info["numberOfAnalystOpinions"] = fin.get("numberOfAnalystOpinions", {}).get("raw")
-                
-                # שחזור אלגוריתם הדוחות המדויק
-                earn = res_data.get("earningsHistory", {}).get("history", [])
-                beat_list = []
-                for q in earn:
-                    act = q.get("epsActual", {}).get("raw")
-                    est = q.get("epsEstimate", {}).get("raw")
-                    if act is not None and est is not None:
-                        beat_list.append(act >= est)
-                info["earnings_beat_list"] = beat_list
-    except:
-        pass
-
-    # שכבה 2: גיבוי דרך הספרייה הרגילה
-    if not info.get("recommendationKey") or info.get("revenueGrowth") is None:
+    
+    for attempt in range(2):
+        calls_oi, puts_oi = 0, 0
+        
+        # שכבה 1: שליפה רגילה דרך yfinance
         try:
             t = yf.Ticker(ticker_clean)
-            yi = t.info
-            info["revenueGrowth"] = info.get("revenueGrowth") or yi.get("revenueGrowth")
-            info["recommendationKey"] = info.get("recommendationKey") or yi.get("recommendationKey")
-            info["numberOfAnalystOpinions"] = info.get("numberOfAnalystOpinions") or yi.get("numberOfAnalystOpinions")
+            dates = t.options
+            if dates:
+                for date in dates[:2]:
+                    try:
+                        chain = t.option_chain(date)
+                        if 'openInterest' in chain.calls.columns:
+                            calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                        if 'openInterest' in chain.puts.columns:
+                            puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+                    except:
+                        continue
+                if calls_oi > 0 or puts_oi > 0:
+                    return calls_oi, puts_oi
         except:
             pass
 
+        # שכבה 2: חדירה ישירה ל-API הנסתר של יאהו עם Crumb אבטחה
+        try:
+            session, crumb = get_yahoo_crumb_and_cookie()
+            url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
+            if crumb:
+                url += f"?crumb={crumb}"
+            res = session.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                result = data.get("optionChain", {}).get("result", [])
+                if result:
+                    expirations = result[0].get("expirationDates", [])
+                    for exp in expirations[:2]:
+                        exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
+                        if crumb:
+                            exp_url += f"&crumb={crumb}"
+                        exp_res = session.get(exp_url, timeout=5)
+                        if exp_res.status_code == 200:
+                            exp_data = exp_res.json()
+                            chain = exp_data.get("optionChain", {}).get("result", [])
+                            if chain:
+                                options = chain[0].get("options", [])
+                                if options:
+                                    for c in options[0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
+                                    for p in options[0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
+                    if calls_oi > 0 or puts_oi > 0:
+                        return calls_oi, puts_oi
+        except:
+            pass
+            
+        time.sleep(1) # השהייה לפני ניסיון חוזר
+        
+    return calls_oi, puts_oi
+
+def fetch_fundamentals(ticker_symbol):
+    """נבנה ללא Cache ובודק דוחות רבעוניים מודרניים"""
+    ticker_clean = ticker_symbol.strip().upper()
+    
+    for attempt in range(2):
+        info = {}
+        
+        # שכבה 1: שליפה רגילה
+        try:
+            t = yf.Ticker(ticker_clean)
+            info = t.info or {}
+            
+            # חישוב דוחות לפי הפורמט החדש של יאהו (earnings_dates)
+            try:
+                earn_df = t.earnings_dates
+                if earn_df is not None and not earn_df.empty:
+                    past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS']).head(4)
+                    if not past_earn.empty:
+                        beat_list = []
+                        for _, row in past_earn.iterrows():
+                            beat_list.append(row['Reported EPS'] >= row['EPS Estimate'])
+                        info['earnings_beat_list'] = beat_list
+            except:
+                pass
+                
+            if info.get("recommendationKey") and "revenueGrowth" in info:
+                return info
+        except:
+            pass
+
+        # שכבה 2: גיבוי API ישיר
+        try:
+            session, crumb = get_yahoo_crumb_and_cookie()
+            url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=financialData,defaultKeyStatistics,earningsHistory"
+            if crumb:
+                url += f"&crumb={crumb}"
+            res = session.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get("quoteSummary", {}).get("result", [])
+                if data:
+                    res_data = data[0]
+                    fin = res_data.get("financialData", {})
+                    
+                    info["revenueGrowth"] = info.get("revenueGrowth") or fin.get("revenueGrowth", {}).get("raw")
+                    info["recommendationKey"] = info.get("recommendationKey") or fin.get("recommendationKey")
+                    info["numberOfAnalystOpinions"] = info.get("numberOfAnalystOpinions") or fin.get("numberOfAnalystOpinions", {}).get("raw")
+                    
+                    if "earnings_beat_list" not in info:
+                        earn = res_data.get("earningsHistory", {}).get("history", [])
+                        beat_list = []
+                        for q in earn:
+                            act = q.get("epsActual", {}).get("raw")
+                            est = q.get("epsEstimate", {}).get("raw")
+                            if act is not None and est is not None:
+                                beat_list.append(act >= est)
+                        info["earnings_beat_list"] = beat_list
+                        
+                    return info
+        except:
+            pass
+            
+        time.sleep(1)
+        
     return info
+
+# =========================================================================
 
 def do_scan(mode):
     tickers  = load_tickers()
@@ -513,7 +561,15 @@ def analyze_ticker(ticker):
 
         info = fetch_fundamentals(clean_ticker)
 
-        # עיבוד והצגת דוחות כספיים - שוחזר האלגוריתם המקורי
+        # שימוש בפונקציית האופציות המשופרת
+        options_text = "אין נתוני אופציות"
+        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
+        total_oi = calls_oi + puts_oi
+        if total_oi > 0:
+            calls_ratio = (calls_oi / total_oi) * 100
+            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
+
+        # דוחות
         earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
         beat_list = info.get("earnings_beat_list", [])
         if beat_list:
@@ -546,14 +602,6 @@ def analyze_ticker(ticker):
             rec_text = f"המלצה: {translated_rec} ({num_analysts} אנליסטים)" if num_analysts else f"המלצה: {translated_rec}"
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
-
-        # עיבוד אופציות דרך הפונקציה החדשה
-        options_text = "אין נתוני אופציות"
-        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
-        total_oi = calls_oi + puts_oi
-        if total_oi > 0:
-            calls_ratio = (calls_oi / total_oi) * 100
-            options_text = f"רוב אופציות קול ({calls_ratio:.1f}%)" if calls_ratio >= 50 else f"רוב אופציות פוט ({100 - calls_ratio:.1f}%)"
         
         # המלצת AI
         ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
