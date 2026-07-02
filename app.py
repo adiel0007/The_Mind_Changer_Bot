@@ -149,7 +149,7 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# פונקציה חכמה לאיתור ובחירת המודל התקין ביותר שזמין ל-API (Fix 404 Errors)
+# פונקציה חכמה לאיתור ובחירת המודל התקין ביותר שזמין ל-API
 def get_best_gemini_model():
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -313,7 +313,7 @@ def do_scan(mode):
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="1y", interval="1d", auto_adjust=True, actions=False)
             
-            # ביטול חסימת ה-200 ימים. מספיק 30 ימים לצורך חישובי מומנטום בסיסיים
+            # ביטול חסימת ה-200 ימים לחיפוש כללי
             if df.empty or len(df) < 30:
                 continue
                 
@@ -334,6 +334,11 @@ def do_scan(mode):
             vol_yest = int(df["Volume"].iloc[-2])
             vol = max(vol_today, vol_yest) 
             
+            # בדיקת מומנטום של ווליום - ממוצע 3 ימים לעומת ממוצע 20 ימים (משולב בסריקה הראשונית)
+            avg_vol_3d = float(df["Volume"].iloc[-3:].mean())
+            avg_vol_20d = float(df["Volume"].rolling(20).mean().iloc[-1])
+            vol_momentum_ok = avg_vol_3d > avg_vol_20d
+            
             chg   = round(((last - prev) / prev) * 100, 2)
             
             open_1, close_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1])
@@ -351,6 +356,7 @@ def do_scan(mode):
                 is_green_2 = (close_2 > open_2)
                 
                 if (rsi < 70 and vol > 300_000 
+                    and vol_momentum_ok
                     and not overextended 
                     and not below_majors 
                     and is_green_1 
@@ -365,7 +371,7 @@ def do_scan(mode):
                 
                 three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
                 
-                if (rsi > 30 and vol > 300_000 and three_consecutive_down_and_red):
+                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -487,7 +493,8 @@ def render_analysis(d):
     rows_html = make_row("RSI (14)", f"{d.get('rsi_val_num', 0):.1f}", d.get("rsi_status", ""), d.get("rsi_pos")) + \
                 make_row("ממוצעים נעים", d.get("ma_status", ""), "3 ימי מסחר", d.get("ma_pos")) + \
                 make_row("סנטימנט אופציות", d.get("options_text", ""), "פעילות נגזרים", None) + \
-                make_row("צפי נתונים", d.get("forecast_text", ""), "תחזית", d.get("forecast_pos")) + \
+                make_row("דוחות כספיים", d.get("earnings", ""), d.get("earnings_badge", ""), d.get("earnings_pos")) + \
+                make_row("צפי נתונים פיננסיים", d.get("forecast_text", ""), "תחזית", d.get("forecast_pos")) + \
                 make_row("הערכת אנליסטים", d.get("rec_text", ""), d.get("rec_badge", ""), d.get("rec_pos"))
 
     html = f'<div class="result-card" style="border: 1px solid rgba(201,168,76,0.15); background: #11110e; border-radius: 4px; overflow: hidden; margin-top: 15px;">' \
@@ -660,10 +667,11 @@ with tab_long:
   <ul class="criteria-list">
     <li><div class="crit-dot dot-green"></div>מגמת מחיר: חיובית, רחוקה לפחות מ-8% מתחת לשיא כל הזמנים</li>
     <li><div class="crit-dot dot-green"></div>מומנטום: לונג (ללא קניית יתר)</li>
-    <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K</li>
+    <li><div class="crit-dot dot-green"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
     <li><div class="crit-dot dot-green"></div>מבנה נרות: שני ימי המסחר האחרונים ירוקים והיום נסגר גבוה מאתמול.</li>
-    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: חסימת כניסה למניות שנסחרות מעל EMA 9, 100 ו-200 במקביל.</li>
+    <li><div class="crit-dot dot-green"></div>מיקום לממוצעים: מניעת כניסה למניות שנסחרות מעל EMA 9, 100 ו-200 במקביל.</li>
     <li><div class="crit-dot dot-green"></div>חסימה נוקשה: פסילת מניות שנסחרות מתחת ל-EMA 100 ו-200 בו זמנית.</li>
+    <li><div class="crit-dot dot-green"></div>סינון עומק (כפתור זהב): מוודא 3 ימי מסחר ירוקים/חיוביים ברצף, ויותר Calls מ-Puts.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -706,19 +714,28 @@ with tab_long:
             if stop_deep_l:
                 st.stop()
             if run_deep_l:
-                with st.spinner("מבצע סינון עומק מחזורי..."):
+                with st.spinner("מבצע סינון עומק: בודק 3 ימים ירוקים ויחס קולים..."):
                     deep_filtered = []
                     for item in st.session_state.long_results:
                         try:
                             ticker_sym = item["symbol"]
-                            ticker_obj = yf.Ticker(ticker_sym)
-                            hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
-                            hist = hist.dropna(subset=["Volume"])
-                            if len(hist) >= 20:
-                                avg_vol_3d = hist["Volume"].iloc[-3:].mean()
-                                avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
-                                if avg_vol_3d > avg_vol_20d:
-                                    deep_filtered.append(item)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
+                            if calls_oi > puts_oi:
+                                ticker_obj = yf.Ticker(ticker_sym)
+                                hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
+                                hist = hist.dropna(subset=["Volume"])
+                                if len(hist) >= 4:
+                                    c1, o1 = float(hist['Close'].iloc[-1]), float(hist['Open'].iloc[-1])
+                                    c2, o2 = float(hist['Close'].iloc[-2]), float(hist['Open'].iloc[-2])
+                                    c3, o3 = float(hist['Close'].iloc[-3]), float(hist['Open'].iloc[-3])
+                                    c4 = float(hist['Close'].iloc[-4])
+                                    
+                                    green_1 = (c1 > o1) and (c1 > c2)
+                                    green_2 = (c2 > o2) and (c2 > c3)
+                                    green_3 = (c3 > o3) and (c3 > c4)
+                                    
+                                    if green_1 and green_2 and green_3:
+                                        deep_filtered.append(item)
                         except:
                             pass
                     st.session_state.long_results = deep_filtered
@@ -734,8 +751,9 @@ with tab_short:
   <ul class="criteria-list">
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
-    <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K</li>
+    <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
     <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
+    <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): בודק יחס אופציות ומאשר רק מניות עם יותר Puts מ-Calls.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
         
@@ -778,21 +796,14 @@ with tab_short:
             if stop_deep_s:
                 st.stop()
             if run_deep_s:
-                with st.spinner("מבצע סינון עומק מחזורי ובודק יחס אופציות (Puts > Calls)..."):
+                with st.spinner("מבצע סינון עומק: בודק יחס אופציות (Puts > Calls)..."):
                     deep_filtered_short = []
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
                             calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
                             if puts_oi > calls_oi:
-                                ticker_obj = yf.Ticker(ticker_sym)
-                                hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
-                                hist = hist.dropna(subset=["Volume"])
-                                if len(hist) >= 20:
-                                    avg_vol_3d = hist["Volume"].iloc[-3:].mean()
-                                    avg_vol_20d = hist["Volume"].rolling(20).mean().iloc[-1]
-                                    if avg_vol_3d > avg_vol_20d:
-                                        deep_filtered_short.append(item)
+                                deep_filtered_short.append(item)
                         except:
                             pass
                     st.session_state.short_results = deep_filtered_short
