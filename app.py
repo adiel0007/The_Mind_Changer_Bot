@@ -149,31 +149,6 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# מנגנון שריון חדש נגד חסימות יאהו פייננס
-# ---------------------------------------------------------
-@st.cache_resource(ttl=3600)
-def get_robust_yf_session():
-    session = requests.Session()
-    ua = random.choice([
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0"
-    ])
-    session.headers.update({
-        "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    })
-    try:
-        # פנייה לדף הבית של יאהו כדי לקבל קוקיז אמיתיים של דפדפן
-        session.get("https://finance.yahoo.com", timeout=5)
-    except:
-        pass
-    return session
 
 def get_best_gemini_model():
     try:
@@ -202,14 +177,14 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
+# הסרת ה-Session המותאם אישית - נותנים ליאהו לנהל את עצמו בגרסה האחרונה
 @st.cache_data(ttl=45, show_spinner=False)
 def fetch_all_market_data():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ", "^GSPC", "^IXIC", "^DJI"]
     quotes_res, indices_res, live_stocks_res = [], [], []
-    session = get_robust_yf_session()
     
     try:
-        df = yf.download(symbols, period="5d", interval="1d", progress=False, session=session)
+        df = yf.download(symbols, period="5d", interval="1d", progress=False)
         if not df.empty:
             close_df = df["Close"] if isinstance(df.columns, pd.MultiIndex) else df
             for sym in symbols:
@@ -250,16 +225,14 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
-# =========================================================================
-# פונקציות הליבה - העברת ה-Session האנושי לכל הבקשות
-# =========================================================================
 
-def fetch_options_sentiment(ticker_symbol, session):
+# פונקציות חופשיות מדריסת Session!
+def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
 
     try:
-        t = yf.Ticker(ticker_clean, session=session)
+        t = yf.Ticker(ticker_clean)
         dates = t.options
         if dates:
             for d in dates[:2]:
@@ -270,17 +243,17 @@ def fetch_options_sentiment(ticker_symbol, session):
                     puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
             if calls_oi > 0 or puts_oi > 0: 
                 return calls_oi, puts_oi
-    except Exception as e:
+    except Exception:
         pass
 
     return calls_oi, puts_oi
 
-def fetch_fundamentals(ticker_symbol, session):
+def fetch_fundamentals(ticker_symbol):
     ticker_clean = ticker_symbol.strip().upper()
     info = {}
     
     try:
-        t = yf.Ticker(ticker_clean, session=session)
+        t = yf.Ticker(ticker_clean)
         fast = t.info or {}
         info["revenueGrowth"] = fast.get("revenueGrowth")
         info["recommendationKey"] = fast.get("recommendationKey")
@@ -292,6 +265,7 @@ def fetch_fundamentals(ticker_symbol, session):
             past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS']).copy()
             now_utc = pd.Timestamp.utcnow()
             
+            # התיקון שמונע קריסה של הדוחות (Timezones) נשאר!
             if past_earn.index.tz is None:
                 past_earn.index = past_earn.index.tz_localize('UTC')
             else:
@@ -322,13 +296,12 @@ def do_scan(mode):
     progress = st.progress(0)
     status   = st.empty()
     total    = len(tickers)
-    session  = get_robust_yf_session()
     
     for i, ticker in enumerate(tickers):
         status.markdown(f"<div style='color:#c9a84c;font-size:0.85rem;text-align:center;margin-bottom:10px;'>🔍 סורק {ticker}... ({i+1}/{total})</div>", unsafe_allow_html=True)
         progress.progress(int((i + 1) / total * 100))
         try:
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             
@@ -394,11 +367,11 @@ def normalize_ticker(raw_ticker):
     if "." in t: t = t.replace(".", "-")
     return t
 
-def _fetch_history_with_retry(ticker, session, attempts=3):
+def _fetch_history_with_retry(ticker, attempts=3):
     last_error = None
     for i in range(attempts):
         try:
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)
             df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             if not df.empty and len(df) >= 30:
                 return df, t, None
@@ -410,8 +383,7 @@ def _fetch_history_with_retry(ticker, session, attempts=3):
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
-        session = get_robust_yf_session()
-        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, session, attempts=3)
+        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
 
         if df.empty or len(df) < 30:
             return {"_error": "invalid"}
@@ -443,13 +415,13 @@ def analyze_ticker(ticker):
         else:
             ma_status, ma_pos = ("חסר נתונים", None)
 
-        info = fetch_fundamentals(clean_ticker, session)
+        info = fetch_fundamentals(clean_ticker)
 
         options_text = "אין נתוני אופציות"
         options_badge = "לא זמין"
         options_pos = None
         
-        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker, session)
+        calls_oi, puts_oi = fetch_options_sentiment(clean_ticker)
         total_oi = calls_oi + puts_oi
         if total_oi > 0:
             calls_ratio = (calls_oi / total_oi) * 100
@@ -511,8 +483,7 @@ def analyze_ticker(ticker):
             if ma_status == "לונג" and rsi < 65 and options_badge in ["לונג", "לא זמין"]: rec_word = "קנייה"
             elif ma_status == "שורט" and rsi > 35: rec_word = "מכירה"
             
-            # עכשיו הגיבוי יגיד לך למה ה-AI נכשל באמת
-            reason = "חריגה ממכסת שימוש" if "429" in error_msg or "quota" in error_msg else "מפתח שגוי או שגיאת רשת"
+            reason = "חריגה ממכסת שימוש" if "429" in error_msg or "quota" in error_msg else "מפתח שגוי או שגיאת תקשורת עם המודל"
             ai_recommendation = f"<b>ה-AI לא זמין כרגע ({reason}).</b><br>המערכת מפיקה המלצה טכנית אוטומטית: זוהה מומנטום של {ma_status} יחד עם RSI ברמה של {rsi:.1f}. המלצה טכנית בלבד: **{rec_word}**."
 
         return {
@@ -781,13 +752,12 @@ with tab_long:
             if run_deep_l:
                 with st.spinner("מבצע סינון עומק: בודק 3 ימים ירוקים ויחס קולים..."):
                     deep_filtered = []
-                    session = get_robust_yf_session()
                     for item in st.session_state.long_results:
                         try:
                             ticker_sym = item["symbol"]
-                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym, session)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
                             if calls_oi > puts_oi:
-                                ticker_obj = yf.Ticker(ticker_sym, session=session)
+                                ticker_obj = yf.Ticker(ticker_sym)
                                 hist = ticker_obj.history(period="1mo", interval="1d", auto_adjust=True)
                                 hist = hist.dropna(subset=["Volume"])
                                 if len(hist) >= 4:
@@ -865,11 +835,10 @@ with tab_short:
             if run_deep_s:
                 with st.spinner("מבצע סינון עומק: בודק יחס אופציות (Puts > Calls)..."):
                     deep_filtered_short = []
-                    session = get_robust_yf_session()
                     for item in st.session_state.short_results:
                         try:
                             ticker_sym = item["symbol"]
-                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym, session)
+                            calls_oi, puts_oi = fetch_options_sentiment(ticker_sym)
                             if puts_oi > calls_oi:
                                 deep_filtered_short.append(item)
                         except:
@@ -935,7 +904,6 @@ with tab_ai:
                         """
                         response = model.generate_content(prompt_text)
                         st.session_state.ai_answer = response.text
-                    # כאן הוספנו את בלוק חשיפת השגיאות האמיתיות במקום המלל הגנרי!
                     except Exception as e:
                         error_str = str(e).lower()
                         if "429" in error_str or "quota" in error_str:
@@ -1021,12 +989,11 @@ with tab_market_dir:
     if run_qqq:
         with st.spinner("סורק נתונים חיים ומחשב ניקוד שוק משוקלל..."):
             try:
-                session = get_robust_yf_session()
-                qqq = yf.Ticker("QQQ", session=session)
+                qqq = yf.Ticker("QQQ")
                 df = qqq.history(period="5y", interval="1d", auto_adjust=True)
                 df = df.dropna(subset=['Close', 'Open', 'High', 'Low'])
                 
-                calls_oi, puts_oi = fetch_options_sentiment("QQQ", session)
+                calls_oi, puts_oi = fetch_options_sentiment("QQQ")
                 
                 market_score = 0
                 
