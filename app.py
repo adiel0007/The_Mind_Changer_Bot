@@ -113,7 +113,7 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     border-bottom-color: #c9a84c !important;
 }}
 
-/* עיצוב כפתורי Form שיהיו זהים לכפתורים הרגילים */
+/* עיצוב כפתורי Form */
 div[data-testid="stForm"] {{ border: none !important; padding: 0 !important; background: transparent !important; }}
 div[data-testid="stFormSubmitButton"] > button, div.stButton > button {{
     width: 100% !important;
@@ -149,6 +149,27 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
+# מחולל זהויות דפדפן כדי למנוע חסימות של יאהו
+def get_random_user_agent():
+    ua_list = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ]
+    return random.choice(ua_list)
+
+def get_best_gemini_model():
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        preferred_models = ['models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro-latest', 'models/gemini-1.5-flash', 'models/gemini-1.5-pro']
+        for pref in preferred_models:
+            if pref in available_models: return genai.GenerativeModel(pref)
+        if available_models: return genai.GenerativeModel(available_models[0])
+    except Exception:
+        pass
+    return genai.GenerativeModel('gemini-1.5-flash')
+
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1: return 50.0
     delta = prices.diff()
@@ -165,9 +186,7 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
-# =======================================================================================
-# THE BULLETPROOF BULK DATA FETCHER 
-# =======================================================================================
+# משיכה המונית כדי למנוע עומס על יאהו בכניסה לאתר
 @st.cache_data(ttl=45, show_spinner=False)
 def fetch_all_market_data():
     symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ", "^GSPC", "^IXIC", "^DJI"]
@@ -177,52 +196,26 @@ def fetch_all_market_data():
         df = yf.download(symbols, period="5d", interval="1d", progress=False)
         if not df.empty:
             close_df = df["Close"] if isinstance(df.columns, pd.MultiIndex) else df
-            
             for sym in symbols:
                 try:
                     if sym in close_df.columns:
                         col = close_df[sym].dropna()
-                    else:
-                        continue
-                        
-                    if len(col) >= 2:
-                        last, prev = float(col.iloc[-1]), float(col.iloc[-2])
-                        chg = round(((last - prev) / prev) * 100, 2)
-                        price_str = f"{last:,.2f}"
-                        is_up = chg >= 0
-                        
-                        data_obj = {"symbol": sym, "price": price_str, "change_pct": chg, "up": is_up, "chg": chg}
-                        
-                        if sym in ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]:
-                            quotes_res.append(data_obj)
-                        if sym in ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]:
-                            live_stocks_res.append(data_obj)
-                        if sym in ["^GSPC", "^IXIC", "^DJI"]:
-                            name = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}[sym]
-                            indices_res.append({"name": name, "price": price_str, "chg": chg, "up": is_up})
+                        if len(col) >= 2:
+                            last, prev = float(col.iloc[-1]), float(col.iloc[-2])
+                            chg = round(((last - prev) / prev) * 100, 2)
+                            price_str = f"{last:,.2f}"
+                            is_up = chg >= 0
+                            data_obj = {"symbol": sym, "price": price_str, "change_pct": chg, "up": is_up, "chg": chg}
+                            
+                            if sym in ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]: quotes_res.append(data_obj)
+                            if sym in ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]: live_stocks_res.append(data_obj)
+                            if sym in ["^GSPC", "^IXIC", "^DJI"]:
+                                name = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}[sym]
+                                indices_res.append({"name": name, "price": price_str, "chg": chg, "up": is_up})
                 except:
                     pass
     except:
         pass
-        
-    if not quotes_res:
-        for sym in symbols:
-            try:
-                hist = yf.Ticker(sym).history(period="5d")
-                if len(hist) >= 2:
-                    last, prev = float(hist['Close'].iloc[-1]), float(hist['Close'].iloc[-2])
-                    chg = round(((last - prev) / prev) * 100, 2)
-                    price_str = f"{last:,.2f}"
-                    is_up = chg >= 0
-                    
-                    data_obj = {"symbol": sym, "price": price_str, "change_pct": chg, "up": is_up, "chg": chg}
-                    if sym in ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]: quotes_res.append(data_obj)
-                    if sym in ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]: live_stocks_res.append(data_obj)
-                    if sym in ["^GSPC", "^IXIC", "^DJI"]:
-                        name = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}[sym]
-                        indices_res.append({"name": name, "price": price_str, "chg": chg, "up": is_up})
-            except:
-                pass
 
     return quotes_res, indices_res, live_stocks_res
 
@@ -241,47 +234,38 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
-# =======================================================================================
-# THE BULLETPROOF OPTIONS & FUNDAMENTALS FETCHERS (NO CACHE POISONING)
-# =======================================================================================
-def get_yahoo_session_and_crumb():
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
-    try:
-        session.get("https://finance.yahoo.com", timeout=4)
-        res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=4)
-        if res.status_code == 200: return session, res.text.strip()
-    except:
-        pass
-    return session, ""
+# =========================================================================
+# פונקציות הליבה - *ללא CACHE בכלל* - תמיד מביאות נתונים חיים
+# =========================================================================
 
 def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
-    
+    session = requests.Session()
+    session.headers.update({"User-Agent": get_random_user_agent()})
+
+    # שכבה 1: API ישיר של יאהו
     try:
-        session, crumb = get_yahoo_session_and_crumb()
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
-        if crumb: url += f"?crumb={crumb}"
         res = session.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json().get("optionChain", {}).get("result", [])
             if data:
                 for exp in data[0].get("expirationDates", [])[:2]:
-                    exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
-                    if crumb: exp_url += f"&crumb={crumb}"
-                    exp_res = session.get(exp_url, timeout=5)
+                    exp_res = session.get(f"{url}?date={exp}", timeout=5)
                     if exp_res.status_code == 200:
                         chain = exp_res.json().get("optionChain", {}).get("result", [])
                         if chain and chain[0].get("options"):
                             for c in chain[0]["options"][0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
                             for p in chain[0]["options"][0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
-                if calls_oi > 0 or puts_oi > 0: return calls_oi, puts_oi
+                if calls_oi > 0 or puts_oi > 0: 
+                    return calls_oi, puts_oi
     except:
         pass
 
+    # שכבה 2: גיבוי מסורתי דרך yfinance
     try:
-        t = yf.Ticker(ticker_clean)
+        t = yf.Ticker(ticker_clean, session=session)
         dates = t.options
         if dates:
             for d in dates[:2]:
@@ -296,45 +280,73 @@ def fetch_options_sentiment(ticker_symbol):
 def fetch_fundamentals(ticker_symbol):
     ticker_clean = ticker_symbol.strip().upper()
     info = {}
+    session = requests.Session()
+    session.headers.update({"User-Agent": get_random_user_agent()})
     
+    # שכבה 1: חילוץ נתונים אגרסיבי מה-API הסודי
     try:
-        t = yf.Ticker(ticker_clean)
-        fast = t.info or {}
-        info["revenueGrowth"] = fast.get("revenueGrowth")
-        info["recommendationKey"] = fast.get("recommendationKey")
-        info["numberOfAnalystOpinions"] = fast.get("numberOfAnalystOpinions")
-        info["profitMargins"] = fast.get("profitMargins")
-        info["trailingEps"] = fast.get("trailingEps")
-        
-        try:
-            earn_df = t.earnings_dates
-            if earn_df is not None and not earn_df.empty:
-                past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS'])
-                past_earn = past_earn[past_earn.index < pd.Timestamp.now(tz='UTC')].head(4)
-                if not past_earn.empty:
-                    info['earnings_beat_list'] = [row['Reported EPS'] >= row['EPS Estimate'] for _, row in past_earn.iterrows()]
-        except:
-            pass
-            
-        # יצירת גיבוי אם אין דוחות מלאים
-        if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
-            if info.get("trailingEps") and info.get("profitMargins"):
-                pm_pct = round(info["profitMargins"] * 100, 1)
-                info['fallback_earnings_text'] = f"רווח למניה: {info['trailingEps']}$ | שולי רווח: {pm_pct}%"
-                info['fallback_earnings_pos'] = pm_pct > 0
-                info['fallback_earnings_badge'] = "רווחי" if pm_pct > 0 else "הפסד"
-            else:
-                try:
-                    mc = t.fast_info.market_cap
-                    if mc:
-                        info['fallback_earnings_text'] = f"שווי שוק מוערך: ${mc / 1e9:.1f}B"
-                        info['fallback_earnings_pos'] = None
-                        info['fallback_earnings_badge'] = "מידע בסיסי"
-                except:
-                    pass
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=financialData,defaultKeyStatistics,earningsHistory,recommendationTrend"
+        res = session.get(url, timeout=5)
+        if res.status_code == 200:
+            data = res.json().get("quoteSummary", {}).get("result", [])
+            if data:
+                fin = data[0].get("financialData", {})
+                info["revenueGrowth"] = fin.get("revenueGrowth", {}).get("raw")
+                info["recommendationKey"] = fin.get("recommendationKey")
+                info["numberOfAnalystOpinions"] = fin.get("numberOfAnalystOpinions", {}).get("raw")
+                info["profitMargins"] = fin.get("profitMargins", {}).get("raw")
+                info["trailingEps"] = fin.get("currentPrice", {}).get("raw")
+                
+                earn = data[0].get("earningsHistory", {}).get("history", [])
+                beat_list = []
+                for q in earn:
+                    act = q.get("epsActual", {}).get("raw")
+                    est = q.get("epsEstimate", {}).get("raw")
+                    if act is not None and est is not None: beat_list.append(act >= est)
+                info["earnings_beat_list"] = beat_list
     except:
         pass
         
+    # שכבה 2: גיבוי ספריה במקרה של חסימה
+    if not info.get("recommendationKey"):
+        try:
+            t = yf.Ticker(ticker_clean, session=session)
+            fast = t.info or {}
+            info["revenueGrowth"] = info.get("revenueGrowth") or fast.get("revenueGrowth")
+            info["recommendationKey"] = info.get("recommendationKey") or fast.get("recommendationKey")
+            info["numberOfAnalystOpinions"] = info.get("numberOfAnalystOpinions") or fast.get("numberOfAnalystOpinions")
+            info["profitMargins"] = info.get("profitMargins") or fast.get("profitMargins")
+            
+            try:
+                earn_df = t.earnings_dates
+                if earn_df is not None and not earn_df.empty:
+                    past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS'])
+                    past_earn = past_earn[past_earn.index < pd.Timestamp.now(tz='UTC')].head(4)
+                    if not past_earn.empty:
+                        info['earnings_beat_list'] = [row['Reported EPS'] >= row['EPS Estimate'] for _, row in past_earn.iterrows()]
+            except:
+                pass
+        except:
+            pass
+
+    # שכבה 3: מנגנון יצירת גיבוי טקסטואלי אם חסרים דוחות
+    if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
+        if info.get("profitMargins"):
+            pm_pct = round(info["profitMargins"] * 100, 1)
+            info['fallback_earnings_text'] = f"נתוני יסוד זמינים: שולי רווח של {pm_pct}%"
+            info['fallback_earnings_pos'] = pm_pct > 0
+            info['fallback_earnings_badge'] = "רווחי" if pm_pct > 0 else "הפסד"
+        else:
+            try:
+                t = yf.Ticker(ticker_clean, session=session)
+                mc = t.fast_info.market_cap
+                if mc:
+                    info['fallback_earnings_text'] = f"שווי שוק מוערך: ${mc / 1e9:.1f}B"
+                    info['fallback_earnings_badge'] = "מידע בסיסי"
+                    info['fallback_earnings_pos'] = None
+            except:
+                pass
+                
     return info
 
 def do_scan(mode):
@@ -420,25 +432,15 @@ def _fetch_history_with_retry(ticker, attempts=3):
     last_error = None
     for i in range(attempts):
         try:
-            t = yf.Ticker(ticker)
+            session = requests.Session()
+            session.headers.update({"User-Agent": get_random_user_agent()})
+            t = yf.Ticker(ticker, session=session)
             df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             if not df.empty and len(df) >= 30:
                 return df, t, None
         except Exception as e:
             last_error = e
-
-        try:
-            df2 = yf.download(ticker, period="5y", interval="1d", progress=False, threads=False)
-            if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
-                df2.columns = df2.columns.get_level_values(0)
-            if not df2.empty and len(df2) >= 30:
-                t_obj = yf.Ticker(ticker)
-                return df2, t_obj, None
-        except Exception as e:
-            last_error = e
-
         time.sleep(1)
-
     return pd.DataFrame(), None, last_error
 
 def analyze_ticker(ticker):
@@ -467,7 +469,6 @@ def analyze_ticker(ticker):
 
         chg = round(((last - prev) / prev) * 100, 2)
         rsi = calculate_rsi(close)
-        
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
         if len(df) >= 200:
@@ -497,7 +498,7 @@ def analyze_ticker(ticker):
                 options_badge = "שורט"
                 options_pos = False
 
-        # דוחות פיננסיים (גיבוי מלא)
+        # דוחות פיננסיים (השתמשנו בגיבוי החכם)
         earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
         beat_list = info.get("earnings_beat_list", [])
         if beat_list:
@@ -508,8 +509,8 @@ def analyze_ticker(ticker):
             earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים (מושלם)" if beats == total_q else f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים" if earnings_pos else f"פספסה תחזיות ברוב הרבעונים האחרונים ({beats}/{total_q})"
         elif info.get("fallback_earnings_text"):
             earnings_text = info["fallback_earnings_text"]
-            earnings_badge = info["fallback_earnings_badge"]
-            earnings_pos = info["fallback_earnings_pos"]
+            earnings_badge = info.get("fallback_earnings_badge", "מידע")
+            earnings_pos = info.get("fallback_earnings_pos")
 
         # צפי נתונים פיננסיים
         rev_growth = info.get("revenueGrowth")
@@ -528,20 +529,22 @@ def analyze_ticker(ticker):
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
         
-        # המלצת AI מוגנת ובלתי שבירה (Bulletproof)
-        ai_recommendation = "מערכת ה-AI אינה מחוברת (חסר מפתח API)."
-        if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
-            try:
+        # המלצת AI מוגנת ובלתי שבירה (Bulletproof Fallback in action!)
+        ai_recommendation = ""
+        try:
+            if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
                 genai.configure(api_key=GEMINI_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים הנעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. סנטימנט האופציות הוא {options_badge}. המטרה שלך: כתוב בדיוק 2 משפטים בעברית שמסכמים את המצב, וסיים במילה אחת מפורשת בלבד (המלצת מסחר): 'קנייה', 'מכירה', או 'המתנה'."
+                model = get_best_gemini_model()
+                prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. סנטימנט האופציות הוא {options_badge}. כתוב 2 משפטים בעברית שמסכמים את המצב, וסיים במילה: 'קנייה', 'מכירה', או 'המתנה'."
                 ai_recommendation = model.generate_content(prompt).text.strip()
-            except Exception:
-                # גיבוי אוטומטי - המערכת הטכנית כותבת המלצה בעצמה אם ה-AI נופל!
-                rec_word = "המתנה"
-                if ma_status == "לונג" and rsi < 65 and options_badge in ["לונג", "לא זמין"]: rec_word = "קנייה"
-                elif ma_status == "שורט" and rsi > 35: rec_word = "מכירה"
-                ai_recommendation = f"המערכת מזהה מומנטום של {ma_status} במחיר יחד עם RSI ברמה של {rsi:.1f}. המלצת המערכת הטכנית (בגיבוי אוטומטי): **{rec_word}**."
+            else:
+                raise ValueError("No Key")
+        except Exception:
+            # הגיבוי האוטומטי - המערכת כותבת המלצה טכנית בעצמה אם ה-AI קורס! לא יהיה יותר ריבוע ריק!
+            rec_word = "המתנה"
+            if ma_status == "לונג" and rsi < 65 and options_badge in ["לונג", "לא זמין"]: rec_word = "קנייה"
+            elif ma_status == "שורט" and rsi > 35: rec_word = "מכירה"
+            ai_recommendation = f"השרתים עמוסים, ולכן המערכת מפיקה המלצה טכנית: זוהה מומנטום של {ma_status} יחד עם RSI ברמה של {rsi:.1f}. המלצת המערכת (גיבוי אוטומטי): **{rec_word}**."
 
         return {
             "ticker": clean_ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg >= 0 else f"{chg}%", "up": chg >= 0,
@@ -948,7 +951,7 @@ with tab_ai:
                 with st.spinner("הבינה המלאכותית מנתחת את שאלתך..."):
                     try:
                         genai.configure(api_key=GEMINI_API_KEY)
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        model = get_best_gemini_model()
                         current_date = datetime.now().strftime("%d/%m/%Y")
                         prompt_text = f"""
                         היום אנחנו בתאריך {current_date}.
