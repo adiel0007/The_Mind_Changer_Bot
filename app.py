@@ -241,37 +241,38 @@ def get_fear_greed_data():
 def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
-    session = requests.Session()
-    session.headers.update({"User-Agent": get_random_user_agent()})
 
-    # שכבה 1: API ישיר של יאהו
+    # שכבה 1: שימוש נקי ב-yfinance שמנהל בעצמו את ה-Cookies
     try:
+        t = yf.Ticker(ticker_clean)
+        dates = t.options
+        if dates:
+            for d in dates[:2]:
+                chain = t.option_chain(d)
+                if chain.calls is not None and not chain.calls.empty and 'openInterest' in chain.calls:
+                    calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                if chain.puts is not None and not chain.puts.empty and 'openInterest' in chain.puts:
+                    puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+            if calls_oi > 0 or puts_oi > 0: 
+                return calls_oi, puts_oi
+    except:
+        pass
+
+    # שכבה 2: גיבוי API ישיר למקרה שהספריה נחסמה
+    try:
+        headers = {"User-Agent": get_random_user_agent()}
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
-        res = session.get(url, timeout=5)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code == 200:
             data = res.json().get("optionChain", {}).get("result", [])
             if data:
                 for exp in data[0].get("expirationDates", [])[:2]:
-                    exp_res = session.get(f"{url}?date={exp}", timeout=5)
+                    exp_res = requests.get(f"{url}?date={exp}", headers=headers, timeout=5)
                     if exp_res.status_code == 200:
                         chain = exp_res.json().get("optionChain", {}).get("result", [])
                         if chain and chain[0].get("options"):
                             for c in chain[0]["options"][0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
                             for p in chain[0]["options"][0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
-                if calls_oi > 0 or puts_oi > 0: 
-                    return calls_oi, puts_oi
-    except:
-        pass
-
-    # שכבה 2: גיבוי מסורתי דרך yfinance
-    try:
-        t = yf.Ticker(ticker_clean, session=session)
-        dates = t.options
-        if dates:
-            for d in dates[:2]:
-                chain = t.option_chain(d)
-                calls_oi += int(chain.calls['openInterest'].fillna(0).sum()) if 'openInterest' in chain.calls else 0
-                puts_oi += int(chain.puts['openInterest'].fillna(0).sum()) if 'openInterest' in chain.puts else 0
     except:
         pass
 
@@ -280,72 +281,65 @@ def fetch_options_sentiment(ticker_symbol):
 def fetch_fundamentals(ticker_symbol):
     ticker_clean = ticker_symbol.strip().upper()
     info = {}
-    session = requests.Session()
-    session.headers.update({"User-Agent": get_random_user_agent()})
     
-    # שכבה 1: חילוץ נתונים אגרסיבי מה-API הסודי
     try:
-        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=financialData,defaultKeyStatistics,earningsHistory,recommendationTrend"
-        res = session.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json().get("quoteSummary", {}).get("result", [])
-            if data:
-                fin = data[0].get("financialData", {})
-                info["revenueGrowth"] = fin.get("revenueGrowth", {}).get("raw")
-                info["recommendationKey"] = fin.get("recommendationKey")
-                info["numberOfAnalystOpinions"] = fin.get("numberOfAnalystOpinions", {}).get("raw")
-                info["profitMargins"] = fin.get("profitMargins", {}).get("raw")
-                info["trailingEps"] = fin.get("currentPrice", {}).get("raw")
-                
-                earn = data[0].get("earningsHistory", {}).get("history", [])
-                beat_list = []
-                for q in earn:
-                    act = q.get("epsActual", {}).get("raw")
-                    est = q.get("epsEstimate", {}).get("raw")
-                    if act is not None and est is not None: beat_list.append(act >= est)
-                info["earnings_beat_list"] = beat_list
-    except:
-        pass
+        t = yf.Ticker(ticker_clean)
+        fast = t.info or {}
+        info["revenueGrowth"] = fast.get("revenueGrowth")
+        info["recommendationKey"] = fast.get("recommendationKey")
+        info["numberOfAnalystOpinions"] = fast.get("numberOfAnalystOpinions")
+        info["profitMargins"] = fast.get("profitMargins")
         
-    # שכבה 2: גיבוי ספריה במקרה של חסימה
-    if not info.get("recommendationKey"):
-        try:
-            t = yf.Ticker(ticker_clean, session=session)
-            fast = t.info or {}
-            info["revenueGrowth"] = info.get("revenueGrowth") or fast.get("revenueGrowth")
-            info["recommendationKey"] = info.get("recommendationKey") or fast.get("recommendationKey")
-            info["numberOfAnalystOpinions"] = info.get("numberOfAnalystOpinions") or fast.get("numberOfAnalystOpinions")
-            info["profitMargins"] = info.get("profitMargins") or fast.get("profitMargins")
+        # הבאת נתוני דוחות וטיפול קריטי באזורי זמן (Timezones)
+        earn_df = t.earnings_dates
+        if earn_df is not None and not earn_df.empty:
+            past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS']).copy()
+            now_utc = pd.Timestamp.utcnow()
             
-            try:
-                earn_df = t.earnings_dates
-                if earn_df is not None and not earn_df.empty:
-                    past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS'])
-                    past_earn = past_earn[past_earn.index < pd.Timestamp.now(tz='UTC')].head(4)
-                    if not past_earn.empty:
-                        info['earnings_beat_list'] = [row['Reported EPS'] >= row['EPS Estimate'] for _, row in past_earn.iterrows()]
-            except:
-                pass
+            # תיקון אזורי זמן כדי למנוע קריסת השוואה
+            if past_earn.index.tz is None:
+                past_earn.index = past_earn.index.tz_localize('UTC')
+            else:
+                past_earn.index = past_earn.index.tz_convert('UTC')
+                
+            past_earn = past_earn[past_earn.index < now_utc].head(4)
+            
+            if not past_earn.empty:
+                beat_list = []
+                for _, row in past_earn.iterrows():
+                    beat_list.append(row['Reported EPS'] >= row['EPS Estimate'])
+                info['earnings_beat_list'] = beat_list
+    except Exception:
+        pass
+
+    # שכבה 2: גיבוי מסורתי מה-API אם ה-DataFrame היה ריק
+    if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
+        try:
+            headers = {"User-Agent": get_random_user_agent()}
+            url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_clean}?modules=earningsHistory"
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get("quoteSummary", {}).get("result", [])
+                if data:
+                    earn = data[0].get("earningsHistory", {}).get("history", [])
+                    beat_list = []
+                    for q in earn:
+                        act = q.get("epsActual", {}).get("raw")
+                        est = q.get("epsEstimate", {}).get("raw")
+                        if act is not None and est is not None: 
+                            beat_list.append(act >= est)
+                    if beat_list:
+                        info["earnings_beat_list"] = beat_list[-4:]
         except:
             pass
 
-    # שכבה 3: מנגנון יצירת גיבוי טקסטואלי אם חסרים דוחות
+    # שכבה 3: יצירת הגיבוי הטקסטואלי רק במקרה קיצון
     if "earnings_beat_list" not in info or not info["earnings_beat_list"]:
         if info.get("profitMargins"):
-            pm_pct = round(info["profitMargins"] * 100, 1)
+            pm_pct = round(info.get("profitMargins", 0) * 100, 1)
             info['fallback_earnings_text'] = f"נתוני יסוד זמינים: שולי רווח של {pm_pct}%"
             info['fallback_earnings_pos'] = pm_pct > 0
             info['fallback_earnings_badge'] = "רווחי" if pm_pct > 0 else "הפסד"
-        else:
-            try:
-                t = yf.Ticker(ticker_clean, session=session)
-                mc = t.fast_info.market_cap
-                if mc:
-                    info['fallback_earnings_text'] = f"שווי שוק מוערך: ${mc / 1e9:.1f}B"
-                    info['fallback_earnings_badge'] = "מידע בסיסי"
-                    info['fallback_earnings_pos'] = None
-            except:
-                pass
                 
     return info
 
@@ -393,7 +387,6 @@ def do_scan(mode):
             
             open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
             open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
-            open_3, close_3, high_3, low_3 = float(df["Open"].iloc[-3]), float(df["Close"].iloc[-3]), float(df["High"].iloc[-3]), float(df["Low"].iloc[-3])
             
             if mode == "long":
                 ath = float(df["High"].max())
@@ -404,16 +397,15 @@ def do_scan(mode):
                 if (rsi < 70 and vol > 300_000 and vol_momentum_ok and not overextended and not below_majors and is_green_1 and is_green_2 and last > prev and last < (ath * 0.92)):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                is_red_1, is_red_2, is_red_3 = (close_1 < open_1), (close_2 < open_2), (close_3 < open_3)
-                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
-                lowest_candle = (low_1 < low_2) and (low_1 < low_3) and (high_1 < high_2) and (high_1 < high_3)
+                is_red_1, is_red_2 = (close_1 < open_1), (close_2 < open_2)
+                two_consecutive_down_and_red = (is_red_1 and is_red_2) and (close_1 < close_2)
+                lowest_candle = (low_1 < low_2) and (high_1 < high_2)
                 
                 above_all_emas_1 = (high_1 > ema9) and (high_1 > ema100) and (high_1 > ema200)
                 above_all_emas_2 = (high_2 > ema9_series.iloc[-2]) and (high_2 > ema100_series.iloc[-2]) and (high_2 > ema200_series.iloc[-2])
-                above_all_emas_3 = (high_3 > ema9_series.iloc[-3]) and (high_3 > ema100_series.iloc[-3]) and (high_3 > ema200_series.iloc[-3])
-                traded_above_all_recently = above_all_emas_1 or above_all_emas_2 or above_all_emas_3
+                traded_above_all_recently = above_all_emas_1 or above_all_emas_2
                 
-                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red and lowest_candle and not traded_above_all_recently):
+                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and two_consecutive_down_and_red and lowest_candle and not traded_above_all_recently):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -501,12 +493,19 @@ def analyze_ticker(ticker):
         # דוחות פיננסיים (השתמשנו בגיבוי החכם)
         earnings_text, earnings_badge, earnings_pos = "אין מספיק נתונים", "לא זמין", None
         beat_list = info.get("earnings_beat_list", [])
+        
         if beat_list:
-            total_q = len(beat_list)
+            total_q = len(beat_list) # בדרך כלל 4 רבעונים
             beats = sum(1 for b in beat_list if b)
             earnings_badge = f"{beats}/{total_q}"
             earnings_pos = True if beats >= total_q / 2 else False
-            earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים (מושלם)" if beats == total_q else f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים" if earnings_pos else f"פספסה תחזיות ברוב הרבעונים האחרונים ({beats}/{total_q})"
+            
+            # הלוגיקה החדשה והמדויקת למלל שביקשת
+            if beats == total_q:
+                earnings_text = f"פגע בתחזית רווח ב-{total_q} מתוך {total_q} רבעונים אחרונים"
+            else:
+                earnings_text = f"פגע בתחזית רווח ב-{beats} מתוך {total_q} רבעונים אחרונים"
+                
         elif info.get("fallback_earnings_text"):
             earnings_text = info["fallback_earnings_text"]
             earnings_badge = info.get("fallback_earnings_badge", "מידע")
@@ -529,7 +528,7 @@ def analyze_ticker(ticker):
             rec_badge = translated_rec
             rec_pos = rec_key in ["buy", "strong_buy"]
         
-        # המלצת AI מוגנת ובלתי שבירה (Bulletproof Fallback in action!)
+        # המלצת AI מוגנת ובלתי שבירה
         ai_recommendation = ""
         try:
             if GENAI_AVAILABLE and GEMINI_API_KEY != "הכנס_כאן_את_המפתח_החדש":
@@ -540,7 +539,7 @@ def analyze_ticker(ticker):
             else:
                 raise ValueError("No Key")
         except Exception:
-            # הגיבוי האוטומטי - המערכת כותבת המלצה טכנית בעצמה אם ה-AI קורס! לא יהיה יותר ריבוע ריק!
+            # הגיבוי האוטומטי
             rec_word = "המתנה"
             if ma_status == "לונג" and rsi < 65 and options_badge in ["לונג", "לא זמין"]: rec_word = "קנייה"
             elif ma_status == "שורט" and rsi > 35: rec_word = "מכירה"
@@ -848,8 +847,8 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני, והנר האחרון חייב להיות הנמוך מכולם.</li>
-    <li><div class="crit-dot dot-red"></div>חסימה נוקשה: פסילת מניות שנסחרו (אפילו בזנב הנר) מעל EMA 9, 100 ו-200 בו זמנית ב-3 הימים האחרונים.</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 2 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני.</li>
+    <li><div class="crit-dot dot-red"></div>חסימה נוקשה: פסילת מניות שנסחרו (אפילו בזנב הנר) מעל EMA 9, 100 ו-200 בו זמנית ב-2 הימים האחרונים.</li>
     <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): בודק יחס אופציות ומאשר רק מניות עם יותר Puts מ-Calls.</li>
   </ul>
 </div>""", unsafe_allow_html=True)
