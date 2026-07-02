@@ -23,7 +23,7 @@ except ImportError:
 
 st.set_page_config(page_title="The Mind Changer", page_icon="📈", layout="wide")
 
-# ניהול רענון נתוני לייב
+# ניהול רענון נתוני לייב מוגן
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = datetime.now().strftime("%H:%M:%S")
 
@@ -149,7 +149,6 @@ div[data-testid="stTextInput"] input {{
 </style>
 """, unsafe_allow_html=True)
 
-# פונקציה חכמה לאיתור ובחירת המודל התקין ביותר שזמין ל-API
 def get_best_gemini_model():
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -159,13 +158,12 @@ def get_best_gemini_model():
                 return genai.GenerativeModel(pref)
         if available_models:
             return genai.GenerativeModel(available_models[0])
-    except Exception:
+    except:
         pass
     return genai.GenerativeModel('gemini-1.5-flash')
 
 def calculate_rsi(prices, period=14):
-    if len(prices) < period + 1:
-        return 50.0
+    if len(prices) < period + 1: return 50.0
     delta = prices.diff()
     gain  = delta.where(delta > 0, 0).rolling(window=period).mean()
     loss  = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -180,124 +178,133 @@ def load_tickers():
         content = f.read().replace(",", " ").replace(";", " ").replace("\n", " ")
         return list(dict.fromkeys([t.strip().upper() for t in content.split() if t.strip()]))
 
-# =================================================================================
-# פתרון פלדה מספר 1: החלפת fast_info למנגנון history עמיד למניעת קריסות ממשק (Blank UI)
-# =================================================================================
-def get_safe_price(sym):
+# =======================================================================================
+# THE BULLETPROOF BULK DATA FETCHER - מונע קריסת עמוד ראשי ("טוען...")
+# =======================================================================================
+@st.cache_data(ttl=45, show_spinner=False)
+def fetch_all_market_data():
+    symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ", "^GSPC", "^IXIC", "^DJI"]
+    quotes_res, indices_res, live_stocks_res = [], [], []
+    
+    # שכבה 1: משיכה המונית סופר-מהירה ומוגנת מחסימות Rate Limit
     try:
-        t = yf.Ticker(sym)
-        df = t.history(period="5d")
-        if not df.empty and len(df) >= 2:
-            last_p = float(df['Close'].iloc[-1])
-            prev_p = float(df['Close'].iloc[-2])
-            chg = round(((last_p - prev_p) / prev_p) * 100, 2)
-            return round(last_p, 2), chg
+        df = yf.download(symbols, period="5d", interval="1d", progress=False)
+        if not df.empty:
+            close_df = df["Close"] if isinstance(df.columns, pd.MultiIndex) else df
+            
+            for sym in symbols:
+                try:
+                    if sym in close_df.columns:
+                        col = close_df[sym].dropna()
+                    else:
+                        continue
+                        
+                    if len(col) >= 2:
+                        last, prev = float(col.iloc[-1]), float(col.iloc[-2])
+                        chg = round(((last - prev) / prev) * 100, 2)
+                        price_str = f"{last:,.2f}"
+                        is_up = chg >= 0
+                        
+                        data_obj = {"symbol": sym, "price": price_str, "change_pct": chg, "up": is_up, "chg": chg}
+                        
+                        if sym in ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]:
+                            quotes_res.append(data_obj)
+                        if sym in ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]:
+                            live_stocks_res.append(data_obj)
+                        if sym in ["^GSPC", "^IXIC", "^DJI"]:
+                            name = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}[sym]
+                            indices_res.append({"name": name, "price": price_str, "chg": chg, "up": is_up})
+                except:
+                    pass
     except:
         pass
-    return None, None
+        
+    # שכבה 2: גיבוי אינדיבידואלי במקרה של תקלה המונית ביאהו
+    if not quotes_res:
+        for sym in symbols:
+            try:
+                hist = yf.Ticker(sym).history(period="5d")
+                if len(hist) >= 2:
+                    last, prev = float(hist['Close'].iloc[-1]), float(hist['Close'].iloc[-2])
+                    chg = round(((last - prev) / prev) * 100, 2)
+                    price_str = f"{last:,.2f}"
+                    is_up = chg >= 0
+                    
+                    data_obj = {"symbol": sym, "price": price_str, "change_pct": chg, "up": is_up, "chg": chg}
+                    if sym in ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]: quotes_res.append(data_obj)
+                    if sym in ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]: live_stocks_res.append(data_obj)
+                    if sym in ["^GSPC", "^IXIC", "^DJI"]:
+                        name = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}[sym]
+                        indices_res.append({"name": name, "price": price_str, "chg": chg, "up": is_up})
+            except:
+                pass
 
-@st.cache_data(ttl=30)
-def fetch_quotes():
-    symbols = ["AAPL","TSLA","NVDA","META","AMZN","MSFT","NFLX","GOOG","SPY","QQQ"]
-    results = []
-    for sym in symbols:
-        price, chg = get_safe_price(sym)
-        if price is not None:
-            results.append({"symbol": sym, "price": price, "change_pct": chg, "up": chg >= 0})
-    return results
-
-@st.cache_data(ttl=30)
-def fetch_indices():
-    mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW JONES"}
-    results = []
-    for sym, name in mapping.items():
-        price, chg = get_safe_price(sym)
-        if price is not None:
-            results.append({"name": name, "price": f"{price:,.2f}", "chg": chg, "up": chg >= 0})
-    return results
-
-@st.cache_data(ttl=30)
-def fetch_live_stocks():
-    syms = ["NVDA","TSLA","AAPL","META","AMZN","MSFT"]
-    results = []
-    for sym in syms:
-        price, chg = get_safe_price(sym)
-        if price is not None:
-            results.append({"symbol": sym, "price": f"{price:,.2f}", "chg": chg, "up": chg >= 0})
-    return results
+    return quotes_res, indices_res, live_stocks_res
 
 def get_fear_greed_data():
     try:
         url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://edition.cnn.com"
-        }
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*", "Origin": "https://edition.cnn.com"}
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             data = r.json()
             val = round(data.get("fear_and_greed", {}).get("score", 55))
             rating = data.get("fear_and_greed", {}).get("rating", "neutral").title()
-            hebrew_mapping = {
-                "Extreme Fear": "פחד קיצוני 😨", "Fear": "פחד 😰", "Neutral": "ניטרלי 😐",
-                "Greed": "גרידיות / תאוות בצע 🤑", "Extreme Greed": "גרידיות קיצונית 🚀"
-            }
+            hebrew_mapping = {"Extreme Fear": "פחד קיצוני 😨", "Fear": "פחד 😰", "Neutral": "ניטרלי 😐", "Greed": "גרידיות / תאוות בצע 🤑", "Extreme Greed": "גרידיות קיצונית 🚀"}
             return val, hebrew_mapping.get(rating, "ניטרלי 😐")
     except:
         pass
     return 55, "ניטרלי 😐"
 
-# =================================================================================
-# פתרון פלדה מספר 2: אופציות ודוחות ללא Cache מורעל ובנייה מחדש של אלגוריתם ה-EPS
-# =================================================================================
+# =======================================================================================
+# THE BULLETPROOF OPTIONS & FUNDAMENTALS FETCHERS (NO CACHE POISONING)
+# =======================================================================================
+def get_yahoo_session_and_crumb():
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"})
+    try:
+        session.get("https://finance.yahoo.com", timeout=4)
+        res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=4)
+        if res.status_code == 200: return session, res.text.strip()
+    except:
+        pass
+    return session, ""
+
 def fetch_options_sentiment(ticker_symbol):
     calls_oi, puts_oi = 0, 0
     ticker_clean = ticker_symbol.strip().upper()
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+    
+    # נסיון 1: API סודי ועקיפת חסימות
+    try:
+        session, crumb = get_yahoo_session_and_crumb()
+        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
+        if crumb: url += f"?crumb={crumb}"
+        res = session.get(url, timeout=5)
+        if res.status_code == 200:
+            data = res.json().get("optionChain", {}).get("result", [])
+            if data:
+                for exp in data[0].get("expirationDates", [])[:2]:
+                    exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
+                    if crumb: exp_url += f"&crumb={crumb}"
+                    exp_res = session.get(exp_url, timeout=5)
+                    if exp_res.status_code == 200:
+                        chain = exp_res.json().get("optionChain", {}).get("result", [])
+                        if chain and chain[0].get("options"):
+                            for c in chain[0]["options"][0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
+                            for p in chain[0]["options"][0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
+                if calls_oi > 0 or puts_oi > 0: return calls_oi, puts_oi
+    except:
+        pass
 
+    # נסיון 2: גיבוי מסורתי (yfinance)
     try:
         t = yf.Ticker(ticker_clean)
         dates = t.options
         if dates:
-            for date in dates[:2]:
-                try:
-                    chain = t.option_chain(date)
-                    if 'openInterest' in chain.calls.columns:
-                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                    if 'openInterest' in chain.puts.columns:
-                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
-                except:
-                    continue
-            if calls_oi > 0 or puts_oi > 0:
-                return calls_oi, puts_oi
-    except:
-        pass
-        
-    try:
-        session = requests.Session()
-        session.headers.update(headers)
-        session.get("https://fc.yahoo.com", timeout=3)
-        crumb_res = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=3)
-        crumb = crumb_res.text.strip() if crumb_res.status_code == 200 else ""
-        
-        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?crumb={crumb}" if crumb else f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}"
-        res = session.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get("optionChain", {}).get("result", [])
-            if result:
-                expirations = result[0].get("expirationDates", [])
-                for exp in expirations[:2]:
-                    exp_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}&crumb={crumb}" if crumb else f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_clean}?date={exp}"
-                    exp_res = session.get(exp_url, timeout=5)
-                    if exp_res.status_code == 200:
-                        chain = exp_res.json().get("optionChain", {}).get("result", [])
-                        if chain:
-                            opts = chain[0].get("options", [])
-                            if opts:
-                                for c in opts[0].get("calls", []): calls_oi += c.get("openInterest", 0) or 0
-                                for p in opts[0].get("puts", []): puts_oi += p.get("openInterest", 0) or 0
+            for d in dates[:2]:
+                chain = t.option_chain(d)
+                calls_oi += int(chain.calls['openInterest'].fillna(0).sum()) if 'openInterest' in chain.calls else 0
+                puts_oi += int(chain.puts['openInterest'].fillna(0).sum()) if 'openInterest' in chain.puts else 0
     except:
         pass
 
@@ -309,22 +316,18 @@ def fetch_fundamentals(ticker_symbol):
     
     try:
         t = yf.Ticker(ticker_clean)
-        yi = t.info or {}
-        info["revenueGrowth"] = yi.get("revenueGrowth")
-        info["recommendationKey"] = yi.get("recommendationKey")
-        info["numberOfAnalystOpinions"] = yi.get("numberOfAnalystOpinions")
+        fast = t.info
+        info["revenueGrowth"] = fast.get("revenueGrowth")
+        info["recommendationKey"] = fast.get("recommendationKey")
+        info["numberOfAnalystOpinions"] = fast.get("numberOfAnalystOpinions")
         
-        try:
-            earn_df = t.earnings_dates
-            if earn_df is not None and not earn_df.empty:
-                past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS']).head(4)
-                if not past_earn.empty:
-                    beat_list = []
-                    for _, row in past_earn.iterrows():
-                        beat_list.append(row['Reported EPS'] >= row['EPS Estimate'])
-                    info['earnings_beat_list'] = beat_list
-        except:
-            pass
+        # שיטת דוחות חסינת כדורים - שימוש במודול החדש של יאהו
+        earn_df = t.earnings_dates
+        if earn_df is not None and not earn_df.empty:
+            past_earn = earn_df.dropna(subset=['EPS Estimate', 'Reported EPS'])
+            past_earn = past_earn[past_earn.index < pd.Timestamp.now(tz='UTC')].head(4)
+            if not past_earn.empty:
+                info['earnings_beat_list'] = [row['Reported EPS'] >= row['EPS Estimate'] for _, row in past_earn.iterrows()]
     except:
         pass
         
@@ -345,12 +348,9 @@ def do_scan(mode):
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
                 df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             
-            if df.empty or len(df) < 30:
-                continue
-                
+            if df.empty or len(df) < 30: continue
             df = df.dropna(subset=["Close", "Open", "High", "Low", "Volume"])
-            if len(df) < 30:
-                continue
+            if len(df) < 30: continue
             
             close = df["Close"]
             last  = float(close.iloc[-1])
@@ -373,7 +373,7 @@ def do_scan(mode):
             avg_vol_20d = float(df["Volume"].rolling(20).mean().iloc[-1])
             vol_momentum_ok = avg_vol_3d > avg_vol_20d
             
-            chg   = round(((last - prev) / prev) * 100, 2)
+            chg = round(((last - prev) / prev) * 100, 2)
             
             open_1, close_1, high_1, low_1 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1]), float(df["High"].iloc[-1]), float(df["Low"].iloc[-1])
             open_2, close_2, high_2, low_2 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["High"].iloc[-2]), float(df["Low"].iloc[-2])
@@ -381,32 +381,23 @@ def do_scan(mode):
             
             if mode == "long":
                 ath = float(df["High"].max())
-                not_at_ath_long = last < (ath * 0.92)
-                
                 overextended = (last > ema9) and (last > ema100) and (last > ema200)
                 below_majors = (last < ema100) and (last < ema200)
+                is_green_1, is_green_2 = (close_1 > open_1), (close_2 > open_2)
                 
-                is_green_1 = (close_1 > open_1)
-                is_green_2 = (close_2 > open_2)
-                
-                if (rsi < 70 and vol > 300_000 
-                    and vol_momentum_ok
-                    and not overextended 
-                    and not below_majors 
-                    and is_green_1 
-                    and is_green_2 
-                    and last > prev
-                    and not_at_ath_long):
+                if (rsi < 70 and vol > 300_000 and vol_momentum_ok and not overextended and not below_majors and is_green_1 and is_green_2 and last > prev and last < (ath * 0.92)):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                two_consecutive_negative_closes = (close_1 < close_2) and (close_2 < close_3)
+                is_red_1, is_red_2, is_red_3 = (close_1 < open_1), (close_2 < open_2), (close_3 < open_3)
+                three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
+                lowest_candle = (low_1 < low_2) and (low_1 < low_3) and (high_1 < high_2) and (high_1 < high_3)
                 
                 above_all_emas_1 = (high_1 > ema9) and (high_1 > ema100) and (high_1 > ema200)
                 above_all_emas_2 = (high_2 > ema9_series.iloc[-2]) and (high_2 > ema100_series.iloc[-2]) and (high_2 > ema200_series.iloc[-2])
                 above_all_emas_3 = (high_3 > ema9_series.iloc[-3]) and (high_3 > ema100_series.iloc[-3]) and (high_3 > ema200_series.iloc[-3])
                 traded_above_all_recently = above_all_emas_1 or above_all_emas_2 or above_all_emas_3
                 
-                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and two_consecutive_negative_closes and not traded_above_all_recently):
+                if (rsi > 30 and vol > 300_000 and vol_momentum_ok and three_consecutive_down_and_red and lowest_candle and not traded_above_all_recently):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"{chg}%", "up": False})
         except:
             continue
@@ -421,58 +412,25 @@ def normalize_ticker(raw_ticker):
     if "." in t: t = t.replace(".", "-")
     return t
 
-def _fetch_history_with_retry(ticker, attempts=3):
-    last_error = None
-    for i in range(attempts):
-        try:
-            t = yf.Ticker(ticker)
-            df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
-            if not df.empty and len(df) >= 30:
-                return df, t, None
-        except Exception as e:
-            last_error = e
-
-        try:
-            df2 = yf.download(ticker, period="5y", interval="1d", progress=False, threads=False)
-            if not df2.empty and isinstance(df2.columns, pd.MultiIndex):
-                df2.columns = df2.columns.get_level_values(0)
-            if not df2.empty and len(df2) >= 30:
-                t_obj = yf.Ticker(ticker)
-                return df2, t_obj, None
-        except Exception as e:
-            last_error = e
-
-        time.sleep(1.5 * (i + 1))
-
-    return pd.DataFrame(), None, last_error
-
 def analyze_ticker(ticker):
     try:
         clean_ticker = normalize_ticker(ticker)
-        df, t, fetch_error = _fetch_history_with_retry(clean_ticker, attempts=3)
+        t = yf.Ticker(clean_ticker)
+        df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
 
-        if df.empty or len(df) < 30:
-            return {"_error": "invalid"}
-
+        if df.empty or len(df) < 30: return {"_error": "invalid"}
         df = df.dropna(subset=["Close", "Open", "Volume"])
         close = df["Close"]
 
-        last = float(close.iloc[-1])
-        prev = float(close.iloc[-2])
+        last, prev = float(close.iloc[-1]), float(close.iloc[-2])
         try:
             fi = t.fast_info if t is not None else None
-            if fi is not None:
-                live_price = float(fi.last_price)
-                live_prev_close = float(fi.previous_close)
-                if live_price > 0 and live_prev_close > 0:
-                    last = live_price
-                    prev = live_prev_close
-        except:
-            pass
+            if fi is not None and float(fi.last_price) > 0:
+                last, prev = float(fi.last_price), float(fi.previous_close)
+        except: pass
 
         chg = round(((last - prev) / prev) * 100, 2)
         rsi = calculate_rsi(close)
-        
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
         if len(df) >= 200:
@@ -499,15 +457,8 @@ def analyze_ticker(ticker):
             total_q = len(beat_list)
             beats = sum(1 for b in beat_list if b)
             earnings_badge = f"{beats}/{total_q}"
-            if beats == total_q:
-                earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים (מושלם)"
-                earnings_pos = True
-            elif beats >= total_q / 2:
-                earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים"
-                earnings_pos = True
-            else:
-                earnings_text = f"פספסה תחזיות ברוב הרבעונים האחרונים ({beats}/{total_q})"
-                earnings_pos = False
+            earnings_pos = True if beats >= total_q / 2 else False
+            earnings_text = f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים (מושלם)" if beats == total_q else f"עמדה בתחזית ב-{beats} מתוך {total_q} רבעונים אחרונים" if earnings_pos else f"פספסה תחזיות ברוב הרבעונים האחרונים ({beats}/{total_q})"
 
         # צפי נתונים פיננסיים
         rev_growth = info.get("revenueGrowth")
@@ -534,7 +485,7 @@ def analyze_ticker(ticker):
                 model = get_best_gemini_model()
                 prompt = f"המניה {clean_ticker} עומדת על {last}$ עם שינוי של {chg}%. ה-RSI הוא {rsi:.1f}. הממוצעים הנעים מצביעים על {ma_status}. המלצת האנליסטים היא {rec_badge}. המטרה שלך: כתוב בדיוק 2 משפטים בעברית שמסכמים את המצב, וסיים במילה אחת מפורשת בלבד (המלצת מסחר): 'קנייה', 'מכירה', או 'המתנה'."
                 ai_recommendation = model.generate_content(prompt).text.strip()
-            except Exception as e:
+            except:
                 ai_recommendation = "שגיאת התחברות לשרתי ה-AI בעת ניתוח המניה."
 
         return {
@@ -589,8 +540,8 @@ def render_analysis(d):
 for k in ["long_results", "short_results", "analysis", "ai_answer"]:
     if k not in st.session_state: st.session_state[k] = None
 
-with st.spinner("טוען נתוני שוק חיים..."):
-    quotes, indices, stocks = fetch_quotes(), fetch_indices(), fetch_live_stocks()
+with st.spinner("מוודא תקשורת רציפה מול הבורסה..."):
+    quotes, indices, stocks = fetch_all_market_data()
 
 top_html = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -665,7 +616,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 <nav>
   <div class="nav-logo">The Mind Changer</div>
 </nav>
-<div class="tape-wrap"><div class="tape-inner" id="tape">טוען...</div></div>
+<div class="tape-wrap"><div class="tape-inner" id="tape"></div></div>
 <section id="hero">
   <div class="hero-bg-img"></div>
   <div class="hero-left">
@@ -685,7 +636,7 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
         <div class="live-card-title">שוק בזמן אמת <span style="font-size: 0.65rem; color: #7a7060; font-weight: 500; margin-right: 8px;">(עודכן: {st.session_state.last_refresh})</span></div>
         <div class="live-label"><div class="live-dot"></div>&nbsp;LIVE</div>
       </div>
-      <div id="indices-rows"><div style="color:#7a7060;font-size:0.78rem;padding:8px 0">טוען מדדים...</div></div>
+      <div id="indices-rows"></div>
       <div id="stocks-rows"></div>
     </div>
   </div>
@@ -697,24 +648,32 @@ nav{{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:ce
 const QUOTES  = {json.dumps(quotes, ensure_ascii=False)};
 const INDICES = {json.dumps(indices, ensure_ascii=False)};
 const STOCKS  = {json.dumps(stocks, ensure_ascii=False)};
+
 function buildTape() {{
-  if (!QUOTES.length) return;
+  if (!QUOTES || QUOTES.length === 0) {{
+    document.getElementById('tape').innerHTML = '<div class="tape-item"><span style="color:#dc2626;">החיבור לבורסה עמוס. לחץ על לחצן רענן נתונים למעלה.</span></div>';
+    return;
+  }}
   const full = [...QUOTES, ...QUOTES];
   document.getElementById('tape').innerHTML = full.map(t =>
     '<div class="tape-item">' + '<span class="tape-sym">' + t.symbol + '</span>' +
     '<span class="' + (t.up ? 'tape-up' : 'tape-dn') + '">' + t.price + ' ' + (t.change_pct >= 0 ? '+' : '') + t.change_pct + '%</span>' + '</div>'
   ).join('');
 }}
+
 function buildHero() {{
   var idxEl = document.getElementById('indices-rows');
-  if (INDICES.length) {{
+  if (!INDICES || INDICES.length === 0) {{
+    idxEl.innerHTML = '<div style="color:#dc2626;font-size:0.78rem;padding:8px 0;text-align:center;">שגיאת רשת זמנית. נסה לרענן.</div>';
+  }} else {{
     idxEl.innerHTML = INDICES.map(i =>
       '<div class="market-row">' + '<span class="mrow-name">' + i.name + '</span>' + '<span class="mrow-val">' + i.price + '</span>' +
       '<span class="' + (i.up ? 'mrow-up' : 'mrow-dn') + '">' + (i.chg >= 0 ? '+' : '') + i.chg + '%</span>' + '</div>'
     ).join('');
   }}
+
   var stEl = document.getElementById('stocks-rows');
-  if (STOCKS.length) {{
+  if (STOCKS && STOCKS.length > 0) {{
     stEl.innerHTML = STOCKS.map(s =>
       '<div class="market-row">' + '<span class="mrow-name">' + s.symbol + '</span>' + '<span class="mrow-val">' + s.price + '</span>' +
       '<span class="' + (s.up ? 'mrow-up' : 'mrow-dn') + '">' + (s.chg >= 0 ? '+' : '') + s.chg + '%</span>' + '</div>'
@@ -830,7 +789,7 @@ with tab_short:
     <li><div class="crit-dot dot-red"></div>מגמת מחיר: שלילית</li>
     <li><div class="crit-dot dot-red"></div>מומנטום: שורט (RSI מעל 30)</li>
     <li><div class="crit-dot dot-red"></div>נפח מסחר: מעל 300K, וממוצע 3 ימים גבוה מממוצע 20 ימים</li>
-    <li><div class="crit-dot dot-red"></div>מבנה נרות: 2 סגירות שליליות רצופות בסוף התנועה.</li>
+    <li><div class="crit-dot dot-red"></div>מבנה נרות: חובה 3 נרות אדומים טהורים ברצף שנסגרים נמוך אחד מהשני, והנר האחרון חייב להיות הנמוך מכולם.</li>
     <li><div class="crit-dot dot-red"></div>חסימה נוקשה: פסילת מניות שנסחרו (אפילו בזנב הנר) מעל EMA 9, 100 ו-200 בו זמנית ב-3 הימים האחרונים.</li>
     <li><div class="crit-dot dot-red"></div>סינון עומק (כפתור זהב): בודק יחס אופציות ומאשר רק מניות עם יותר Puts מ-Calls.</li>
   </ul>
@@ -1187,7 +1146,7 @@ footer{background:#0f0f0c;border-top:1px solid rgba(201,168,76,0.12);padding:36p
     <div class="feat-card"><span class="feat-icon">📈</span><div class="feat-title">רדאר לונג</div><div class="feat-desc">מזהה מומנטום עולה עם RSI, ממוצעים נעים ונרות</div></div>
     <div class="feat-card"><span class="feat-icon">📉</span><div class="feat-title">רדאר שורט</div><div class="feat-desc">מאתר מניות חלשות עם Puts חזקים ומגמה יורדת</div></div>
     <div class="feat-card"><span class="feat-icon">📊</span><div class="feat-title">14 אינדיקטורים</div><div class="feat-desc">RSI, MA9/100/200, אופציות, המלצות אנליסטים ועוד</div></div>
-    <div class="feat-card"><span class="feat-icon">🔒</span><div class="feat-title">נתונים מאובטחים</div><div class="feat-desc">מנגנון משיכה עמיד ומתקדם לחדירת חומות אבטחה</div></div>
+    <div class="feat-card"><span class="feat-icon">🔒</span><div class="feat-title">נתונים מאובטחים</div><div class="feat-desc">עקיפת Rate Limits חכמה עם Session דינמי</div></div>
     <div class="feat-card"><span class="feat-icon">🤖</span><div class="feat-title">ניתוח AI</div><div class="feat-desc">נתונים טכניים אמיתיים לכל מניה שתבחר</div></div>
   </div>
 </section>
