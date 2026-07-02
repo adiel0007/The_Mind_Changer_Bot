@@ -271,23 +271,80 @@ def get_fear_greed_data():
         pass
     return 55, "ניטרלי 😐"
 
+# ====== תיקון פונקציית האופציות - מנגנון חסין כשלים ========
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_options_sentiment(ticker_symbol):
+    calls_oi, puts_oi = 0, 0
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
+
+    # 1. ניסיון משיכה באמצעות yfinance
     try:
         t = yf.Ticker(ticker_symbol)
         dates = t.options
-        calls_oi, puts_oi = 0, 0
         if dates:
-            for date in dates[:2]:
+            for date in dates[:3]:
                 try:
                     chain = t.option_chain(date)
-                    calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
-                    puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
+                    if 'openInterest' in chain.calls.columns:
+                        calls_oi += int(chain.calls['openInterest'].fillna(0).sum())
+                    if 'openInterest' in chain.puts.columns:
+                        puts_oi += int(chain.puts['openInterest'].fillna(0).sum())
                 except:
                     continue
-        return calls_oi, puts_oi
+            if calls_oi > 0 or puts_oi > 0:
+                return calls_oi, puts_oi
     except:
-        return 0, 0
+        pass
+
+    # 2. ניסיון גיבוי אגרסיבי ישירות משרתי Yahoo Finance (עוקף חסימות)
+    try:
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # קבלת קוקיז 
+        session.get(f'https://finance.yahoo.com/quote/{ticker_symbol}', timeout=5)
+        
+        # ניסיון קבלת Crumb
+        crumb = ""
+        try:
+            c_res = session.get('https://query1.finance.yahoo.com/v1/test/getcrumb', timeout=5)
+            if c_res.status_code == 200:
+                crumb = c_res.text.strip()
+        except:
+            pass
+            
+        base_url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
+        url = f"{base_url}?crumb={crumb}" if crumb else base_url
+        
+        res = session.get(url, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            result = data.get('optionChain', {}).get('result', [])
+            if result:
+                exp_dates = result[0].get('expirationDates', [])
+                for exp in exp_dates[:3]:
+                    exp_url = f"{base_url}?date={exp}&crumb={crumb}" if crumb else f"{base_url}?date={exp}"
+                    exp_res = session.get(exp_url, timeout=5)
+                    if exp_res.status_code == 200:
+                        exp_data = exp_res.json()
+                        opts = exp_data.get('optionChain', {}).get('result', [])
+                        if opts and len(opts) > 0:
+                            opt_list = opts[0].get('options', [])
+                            if opt_list and len(opt_list) > 0:
+                                for c in opt_list[0].get('calls', []):
+                                    calls_oi += c.get('openInterest', 0) or 0
+                                for p in opt_list[0].get('puts', []):
+                                    puts_oi += p.get('openInterest', 0) or 0
+        
+        if calls_oi > 0 or puts_oi > 0:
+            return calls_oi, puts_oi
+    except:
+        pass
+        
+    return calls_oi, puts_oi
+# ==========================================================
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_fundamentals(ticker_symbol):
@@ -311,7 +368,6 @@ def do_scan(mode):
         try:
             t = yf.Ticker(ticker)
             with open(os.devnull, 'w') as dn, contextlib.redirect_stderr(dn):
-                # משיכת 5 שנות נתונים כדי שהחישוב של ממוצע 200 EMA יהיה מדויק ב-100% וישתווה למערכות המסחר
                 df = t.history(period="5y", interval="1d", auto_adjust=True, actions=False)
             
             if df.empty or len(df) < 30:
@@ -338,7 +394,6 @@ def do_scan(mode):
             vol_yest = int(df["Volume"].iloc[-2])
             vol = max(vol_today, vol_yest) 
             
-            # בדיקת מומנטום של ווליום
             avg_vol_3d = float(df["Volume"].iloc[-3:].mean())
             avg_vol_20d = float(df["Volume"].rolling(20).mean().iloc[-1])
             vol_momentum_ok = avg_vol_3d > avg_vol_20d
@@ -356,7 +411,6 @@ def do_scan(mode):
                 overextended = (last > ema9) and (last > ema100) and (last > ema200)
                 below_majors = (last < ema100) and (last < ema200)
                 
-                # חובה שני ימים ירוקים ברצף
                 is_green_1 = (close_1 > open_1)
                 is_green_2 = (close_2 > open_2)
                 
@@ -370,17 +424,14 @@ def do_scan(mode):
                     and not_at_ath_long):
                     results.append({"symbol": ticker, "price": f"${last:.2f}", "chg": f"+{chg}%" if chg > 0 else f"{chg}%", "up": True})
             else:
-                # אכיפת ירידות: חובה ששלושת הימים יהיו אדומים, וכל סגירה נמוכה מקודמתה
                 is_red_1 = close_1 < open_1
                 is_red_2 = close_2 < open_2
                 is_red_3 = close_3 < open_3
                 
                 three_consecutive_down_and_red = (is_red_1 and is_red_2 and is_red_3) and (close_1 < close_2) and (close_2 < close_3)
                 
-                # חוק חדש: הנר של היום חייב להיות נמוך מכולם (גם הגבוה וגם הנמוך שלו נמוכים משל אתמול ושלשום)
                 lowest_candle = (low_1 < low_2) and (low_1 < low_3) and (high_1 < high_2) and (high_1 < high_3)
                 
-                # חסימת פלדה לשורט: פסילת מניות שנסחרו מעל כל הממוצעים יחד באחד מ-3 הימים האחרונים (המניה חזקה מדי לשורט)
                 above_all_emas_1 = (high_1 > ema9) and (high_1 > ema100) and (high_1 > ema200)
                 above_all_emas_2 = (high_2 > ema9_series.iloc[-2]) and (high_2 > ema100_series.iloc[-2]) and (high_2 > ema200_series.iloc[-2])
                 above_all_emas_3 = (high_3 > ema9_series.iloc[-3]) and (high_3 > ema100_series.iloc[-3]) and (high_3 > ema200_series.iloc[-3])
@@ -459,12 +510,9 @@ def analyze_ticker(ticker):
         
         rsi_status, rsi_pos = ("זמן למכור", False) if rsi > 70 else ("זמן לקנות", True) if rsi < 30 else ("ניטרלי", None)
 
-        if len(df) >= 200:
-            ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
-            ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
-            ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
-        else:
-            ma_status, ma_pos = ("חסר נתונים", None)
+        ema100_val = float(close.ewm(span=100, adjust=False).mean().iloc[-1])
+        ema200_val = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
+        ma_status, ma_pos = ("לונג", True) if (last > ema100_val and last > ema200_val) else ("שורט", False) if (last < ema100_val and last < ema200_val) else ("ניטרלי", None)
 
         info = fetch_fundamentals(clean_ticker)
 
@@ -1045,7 +1093,7 @@ with tab_market_dir:
                         <div style="font-size: 0.75rem; color: #7a7060;">ערך נוכחי: {rsi_val:.1f}</div>
                     </div>
                     <div style="background: #141410; border: 1px solid rgba(201,168,76,0.15); border-radius: 4px; padding: 20px; text-align: center;">
-                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעולת מחיר (נרות)</div>
+                        <div style="font-size: 0.8rem; color: #9a8f7a; margin-bottom: 10px;">3. פעול מחיר (נרות)</div>
                         <div style="font-size: 1.2rem; font-weight: 700; color: #c9a84c; margin-bottom: 5px;">{pa_status}</div>
                         <div style="font-size: 0.75rem; color: #7a7060;">הסגירה היומית מול הסגירה אתמול</div>
                     </div>
